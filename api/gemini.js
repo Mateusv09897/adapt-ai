@@ -17,7 +17,7 @@ export default async function handler(request, response) {
 
   try {
     // Constrói a URL da API do Google Gemini com o modelo atualizado (1.5-flash).
-    const geminiApiUrl = `https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key=${apiKey}`;
+    const geminiApiUrl = `https://generativelanguage.googleapis.com/v1beta/models/gemini-3.1-flash:generateContent?key=${apiKey}`;
 
     // Envia o corpo da requisição do nosso site diretamente para a API do Gemini.
     const geminiResponse = await fetch(geminiApiUrl, {
