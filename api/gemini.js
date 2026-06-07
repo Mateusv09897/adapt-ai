@@ -1,43 +1,82 @@
-// Este arquivo deve ser guardado numa pasta chamada "api" no seu projeto.
-// Ex: seu-projeto/api/gemini.js
-
+// Este ficheiro atua agora como um Adaptador entre o seu site e o OpenRouter.
 export default async function handler(request, response) {
-  // Apenas permite requisições do tipo POST, que é como o nosso site envia os dados.
   if (request.method !== 'POST') {
     return response.status(405).json({ message: 'Method not allowed' });
   }
 
-  // Pega a chave da API do Gemini que armazenamos de forma segura na Vercel/Netlify.
-  // O nome 'GEMINI_API_KEY' deve ser exatamente este.
-  const apiKey = process.env.GEMINI_API_KEY;
+  // Atenção: Lembre-se de alterar o nome da variável no painel do seu servidor.
+  const apiKey = process.env.OPENROUTER_API_KEY;
 
   if (!apiKey) {
     return response.status(500).json({ error: 'API key not configured on the server.' });
   }
 
   try {
-    // Constrói a URL da API do Google Gemini com o modelo atualizado (1.5-flash).
-    const geminiApiUrl = `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key=${apiKey}`;
+    const parts = request.body.contents[0].parts;
+    let openRouterContent = [];
+    let hasImage = false;
 
-    // Envia o corpo da requisição do nosso site diretamente para a API do Gemini.
-    const geminiResponse = await fetch(geminiApiUrl, {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-      },
-      body: JSON.stringify(request.body), // request.body contém o payload { contents: [...] }
-    });
-
-    const data = await geminiResponse.json();
-
-    // Se a resposta do Gemini não for bem-sucedida, retorna o erro.
-    if (!geminiResponse.ok) {
-      console.error('API Error:', data);
-      throw new Error(data.error.message || 'Failed to fetch from Gemini API');
+    // 1. Converte o formato do Gemini para o formato universal OpenRouter/OpenAI
+    for (const part of parts) {
+      if (part.text) {
+        openRouterContent.push({ type: "text", text: part.text });
+      } else if (part.inlineData) {
+        hasImage = true;
+        openRouterContent.push({
+          type: "image_url",
+          image_url: {
+            // Reconstrói o Base64 para o formato Data URL aceite por visão
+            url: `data:${part.inlineData.mimeType};base64,${part.inlineData.data}`
+          }
+        });
+      }
     }
 
-    // Retorna a resposta bem-sucedida do Gemini para o nosso site.
-    return response.status(200).json(data);
+    // 2. Roteamento Inteligente: Usa Nemotron para texto e Gemini Free para imagens
+    const targetModel = hasImage 
+      ? "google/gemini-1.5-flash:free" 
+      : "nvidia/nemotron-3-super-120b-a12b:free";
+
+    const openRouterPayload = {
+      model: targetModel,
+      messages: [{ role: "user", content: openRouterContent }]
+    };
+
+    // 3. Efetua a chamada ao servidor gratuito do OpenRouter
+    const openRouterResponse = await fetch("https://openrouter.ai/api/v1/chat/completions", {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        "Authorization": `Bearer ${apiKey}`,
+        "HTTP-Referer": "https://adapt-ai.senac", // Opcional para rankings
+        "X-Title": "Adapt AI" // Opcional
+      },
+      body: JSON.stringify(openRouterPayload)
+    });
+
+    const data = await openRouterResponse.json();
+
+    if (!openRouterResponse.ok) {
+      console.error('OpenRouter API Error:', data);
+      throw new Error(data.error?.message || 'Failed to fetch from OpenRouter API');
+    }
+
+    const textoResposta = data.choices[0].message.content;
+
+    // 4. Encapsula o retorno no formato exigido pela função callGemini() do index.html
+    const fakeGeminiResponse = {
+      candidates: [
+        {
+          content: {
+            parts: [
+              { text: textoResposta }
+            ]
+          }
+        }
+      ]
+    };
+
+    return response.status(200).json(fakeGeminiResponse);
 
   } catch (error) {
     console.error('Internal Server Error:', error);
