@@ -133,7 +133,9 @@
             align-items: center;
             justify-content: center;
             gap: 10px;
-            margin-top: 20px;
+            margin-top: 25px;
+            align-self: flex-start; /* Impede que o botão estique em toda a largura */
+            min-width: 200px; /* Garante um tamanho mínimo confortável */ /* Mais espaço entre o input e o botão */
         }
 
         .primary-button:hover:not(:disabled) {
@@ -305,8 +307,9 @@
         .label {
             font-weight: 600;
             color: #003366;
-            margin-bottom: 8px;
+            margin-bottom: 12px; /* Aumentar de 8px para 12px */
             display: block;
+            font-size: 0.95rem; /* Leve redução para contrastar com os inputs */
         }
 
         .status-message {
