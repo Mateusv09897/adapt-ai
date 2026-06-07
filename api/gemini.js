@@ -32,10 +32,8 @@ export default async function handler(request, response) {
       }
     }
 
-   // 2. Roteamento Inteligente: Usa um modelo ultra-rápido para evitar o timeout de 10s da Vercel
-    const targetModel = hasImage 
-      ? "google/gemini-2.0-flash-exp:free" 
-      : "google/gemini-2.0-flash-exp:free"; // Substituímos o Nemotron 120B aqui
+    // 2. Roteamento Inteligente: O OpenRouter escolhe automaticamente o modelo gratuito mais rápido e sem fila
+    const targetModel = "openrouter/free";
 
     const openRouterPayload = {
       model: targetModel,
