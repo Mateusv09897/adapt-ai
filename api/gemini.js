@@ -32,8 +32,8 @@ export default async function handler(request, response) {
       }
     }
 
-   // 2. Roteamento Inteligente (100% Gratuito, Multimodal e Ultra-rápido)
-    const targetModel = "google/gemini-2.0-flash-exp:free";
+   // 2. Roteamento Inteligente (Gratuito, Multimodal e Estável)
+    const targetModel = "google/gemma-4-31b-it:free";
 
     const openRouterPayload = {
       model: targetModel,
