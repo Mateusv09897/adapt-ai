@@ -32,10 +32,10 @@ export default async function handler(request, response) {
       }
     }
 
-   // 2. Roteamento Inteligente: Usa Nemotron para texto e Gemini Free para imagens
+   // 2. Roteamento Inteligente: Usa um modelo ultra-rápido para evitar o timeout de 10s da Vercel
     const targetModel = hasImage 
-      ? "google/gemini-2.0-flash-exp:free" // ID atualizado para suportar visão gratuitamente
-      : "nvidia/nemotron-3-super-120b-a12b:free";
+      ? "google/gemini-2.0-flash-exp:free" 
+      : "google/gemini-2.0-flash-exp:free"; // Substituímos o Nemotron 120B aqui
 
     const openRouterPayload = {
       model: targetModel,
