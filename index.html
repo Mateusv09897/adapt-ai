@@ -595,6 +595,7 @@ window.MathJax = {
                 const prompt = `Simplifique o seguinte texto para que seja mais fácil de entender. Use frases curtas, palavras simples e explique termos complexos. O público-alvo são estudantes com dificuldades de atenção. Texto original: "${originalText}"`;
                 const simplifiedContent = await callGemini([{ text: prompt }]);
                 outputDiv.innerHTML = formatAIResponse(simplifiedContent);
+                if (window.MathJax) { MathJax.typesetPromise([outputDiv]); }
             } catch (error) {
                 outputDiv.innerHTML = '<p>O texto simplificado aparecerá aqui...</p>';
                 showStatus(statusDiv, `Erro ao simplificar: ${error.message}`, 'error');
@@ -619,6 +620,7 @@ window.MathJax = {
                 const prompt = `Você é um mentor inspirador. Explique como o seguinte tópico de estudo se aplica na vida real de forma prática e interessante. Use exemplos concretos e uma linguagem motivadora para um estudante que tem dificuldade em ver a relevância da matéria. Tópico: "${inputText}"`;
                 const contextContent = await callGemini([{ text: prompt }]);
                 outputDiv.innerHTML = formatAIResponse(contextContent);
+                if (window.MathJax) { MathJax.typesetPromise([outputDiv]); }
             } catch (error) {
                 outputDiv.innerHTML = '<p>Exemplos práticos sobre seu tema aparecerão aqui...</p>';
                 showStatus(statusDiv, `Erro ao buscar contexto: ${error.message}`, 'error');
@@ -643,6 +645,7 @@ window.MathJax = {
                 const prompt = `Você é um planejador de projetos e tutor executivo. Quebre a seguinte tarefa em um plano de ação passo a passo. Para cada passo, sugira uma estimativa de tempo realista (ex: 25 min, 1 hora). Apresente o plano de forma clara e organizada, usando uma lista numerada, para um estudante com dificuldade de concentração. Tarefa: "${taskText}"`;
                 const taskPlan = await callGemini([{ text: prompt }]);
                 outputDiv.innerHTML = formatAIResponse(taskPlan);
+                if (window.MathJax) { MathJax.typesetPromise([outputDiv]); }
             } catch (error) {
                 outputDiv.innerHTML = '<p>Seu plano passo a passo aparecerá aqui...</p>';
                 showStatus(statusDiv, `Erro ao criar o plano: ${error.message}`, 'error');
@@ -697,6 +700,7 @@ window.MathJax = {
                 const promptPart = { text: "Descreva esta imagem em detalhes. Seja claro e objetivo, focando nos elementos principais. A descrição é para uma pessoa que não pode ver a imagem." };
                 const description = await callGemini([promptPart, imagePart]);
                 outputDiv.innerHTML = formatAIResponse(description);
+                if (window.MathJax) { MathJax.typesetPromise([outputDiv]); }
             } catch (error) {
                 outputDiv.innerHTML = '<p>A descrição da imagem aparecerá aqui...</p>';
                 showStatus(statusDiv, `Erro ao descrever a imagem: ${error.message}`, 'error');
