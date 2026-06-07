@@ -32,8 +32,8 @@ export default async function handler(request, response) {
       }
     }
 
-    // 2. Roteamento Inteligente: O OpenRouter escolhe automaticamente o modelo gratuito mais rápido e sem fila
-    const targetModel = "openrouter/free";
+   // 2. Roteamento Inteligente (100% Gratuito, Multimodal e Ultra-rápido)
+    const targetModel = "google/gemini-2.0-flash-exp:free";
 
     const openRouterPayload = {
       model: targetModel,
