@@ -32,9 +32,9 @@ export default async function handler(request, response) {
       }
     }
 
-    // 2. Roteamento Inteligente: Usa Nemotron para texto e Gemini Free para imagens
+   // 2. Roteamento Inteligente: Usa Nemotron para texto e Gemini Free para imagens
     const targetModel = hasImage 
-      ? "google/gemini-1.5-flash:free" 
+      ? "google/gemini-2.0-flash-exp:free" // ID atualizado para suportar visão gratuitamente
       : "nvidia/nemotron-3-super-120b-a12b:free";
 
     const openRouterPayload = {
