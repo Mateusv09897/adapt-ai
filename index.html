@@ -537,7 +537,10 @@ window.MathJax = {
         }
 
         function formatAIResponse(text) {
+            // CORREÇÃO: Transforma Markdown em Negrito e Itálico HTML
             text = text.replace(/\*\*(.*?)\*\*/g, '<strong>$1</strong>');
+            text = text.replace(/(?<!\*)\*(?!\s)(.*?)(?<!\s)\*(?!\*)/g, '<em>$1</em>');
+            
             const lines = text.trim().split('\n');
             let html = '';
             let inUnorderedList = false;
