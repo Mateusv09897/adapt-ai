@@ -120,7 +120,7 @@
         }
 
         .primary-button {
-            background: #E65C00;;
+            background: #E65C00;
             color: white;
             border: none;
             padding: 16px 32px;
@@ -134,8 +134,8 @@
             justify-content: center;
             gap: 10px;
             margin-top: 25px;
-            align-self: flex-start; /* Impede que o botão estique em toda a largura */
-            min-width: 200px; /* Garante um tamanho mínimo confortável */ /* Mais espaço entre o input e o botão */
+            align-self: flex-start; 
+            min-width: 200px; 
         }
 
         .primary-button:hover:not(:disabled) {
@@ -307,9 +307,9 @@
         .label {
             font-weight: 600;
             color: #003366;
-            margin-bottom: 12px; /* Aumentar de 8px para 12px */
+            margin-bottom: 12px; 
             display: block;
-            font-size: 0.95rem; /* Leve redução para contrastar com os inputs */
+            font-size: 0.95rem; 
         }
 
         .status-message {
@@ -345,13 +345,19 @@ window.MathJax = {
     displayMath: [['$$', '$$'], ['\\[', '\\]']]
   },
   startup: {
-    typeset: false // Impede que ele rode antes da IA responder
+    typeset: false 
   }
 };
 </script>
 <script id="MathJax-script" async src="https://cdn.jsdelivr.net/npm/mathjax@3/es5/tex-mml-chtml.js"></script>
 </head>
 <body>
+    
+    <!-- Botão Fixo de Reset de Sessão do Totem -->
+    <button onclick="limparTotem()" style="position: fixed; bottom: 20px; right: 20px; background-color: #003366; color: white; border: none; padding: 12px 24px; border-radius: 50px; font-weight: 600; box-shadow: 0 4px 12px rgba(0,0,0,0.15); cursor: pointer; z-index: 9999; display: flex; align-items: center; gap: 8px;">
+        <span>🔄</span> Próximo Aluno
+    </button>
+
     <div class="container">
     <header class="header" style="text-align: center; margin-bottom: 40px;">
         <img src="logo.png" alt="Adapt AI Logo" class="logo-image" style="max-width: 150px; margin-bottom: 10px;">
@@ -511,6 +517,60 @@ window.MathJax = {
         let selectedFile = null;
         let isCurrentlySpeaking = false;
 
+        // --- SISTEMA DE LOGS DE PESQUISA (PROFEPT) ---
+        function registrarLog(modulo, inputAluno) {
+            const logs = JSON.parse(localStorage.getItem('adapt_logs') || '[]');
+            const novoRegistro = {
+                id: crypto.randomUUID(),
+                timestamp: new Date().toISOString(),
+                modulo: modulo,
+                tamanho_input: inputAluno.length,
+                input_texto: inputAluno 
+            };
+            logs.push(novoRegistro);
+            localStorage.setItem('adapt_logs', JSON.stringify(logs));
+        }
+
+        function exportarLogs() {
+            const logs = localStorage.getItem('adapt_logs') || '[]';
+            const blob = new Blob([logs], { type: 'application/json' });
+            const url = URL.createObjectURL(blob);
+            const a = document.createElement('a');
+            a.href = url;
+            a.download = `logs_adapt_intervencao_${new Date().toISOString().slice(0,10)}.json`;
+            a.click();
+        }
+
+        // --- GERENCIAMENTO DE SESSÃO DO TOTEM ---
+        function limparTotem() {
+            document.querySelectorAll('textarea').forEach(t => t.value = '');
+            document.querySelectorAll('.output-box').forEach(o => {
+                o.innerHTML = 'O resultado aparecerá aqui...';
+            });
+            const preview = document.getElementById('image-preview');
+            const placeholder = document.getElementById('image-placeholder');
+            if (preview && placeholder) {
+                preview.style.display = 'none';
+                placeholder.style.display = 'block';
+            }
+            selectedFile = null;
+            if (typeof stopText === 'function') stopText();
+        }
+
+        let timerInatividade;
+        function resetarTimerTotem() {
+            clearTimeout(timerInatividade);
+            timerInatividade = setTimeout(() => {
+                limparTotem();
+                console.log('Sessão do totem reiniciada por inatividade.');
+            }, 180000); // 3 minutos
+        }
+
+        window.addEventListener('click', resetarTimerTotem);
+        window.addEventListener('touchstart', resetarTimerTotem);
+        window.addEventListener('keypress', resetarTimerTotem);
+        resetarTimerTotem();
+
         // --- FUNÇÕES DA API GEMINI ---
         async function callGemini(parts) {
             const payload = { contents: [{ role: "user", parts: parts }] };
@@ -537,7 +597,7 @@ window.MathJax = {
         }
 
         function formatAIResponse(text) {
-            // CORREÇÃO: Transforma Markdown em Negrito e Itálico HTML
+            // Tratamento de Negrito e Itálico via Regex
             text = text.replace(/\*\*(.*?)\*\*/g, '<strong>$1</strong>');
             text = text.replace(/(?<!\*)\*(?!\s)(.*?)(?<!\s)\*(?!\*)/g, '<em>$1</em>');
             
@@ -583,7 +643,6 @@ window.MathJax = {
             return html;
         }
 
-
         // --- FUNÇÕES DAS FERRAMENTAS ---
         async function simplifyText() {
             const originalText = document.getElementById('original-text').value;
@@ -594,6 +653,9 @@ window.MathJax = {
                 showStatus(statusDiv, 'Por favor, insira um texto para simplificar.', 'error');
                 return;
             }
+            
+            registrarLog('Simplificador', originalText);
+            
             setLoadingState(button, 'simplify-text', 'Processando...', true);
             statusDiv.classList.add('hidden');
             outputDiv.innerHTML = '<p>A IA está pensando...</p>';
@@ -619,6 +681,9 @@ window.MathJax = {
                 showStatus(statusDiv, 'Por favor, insira um assunto para contextualizar.', 'error');
                 return;
             }
+
+            registrarLog('ContextoVidaReal', inputText);
+
             setLoadingState(button, 'context-text', 'Conectando...', true);
             statusDiv.classList.add('hidden');
             outputDiv.innerHTML = '<p>A IA está buscando conexões com o mundo real...</p>';
@@ -644,6 +709,9 @@ window.MathJax = {
                 showStatus(statusDiv, 'Por favor, descreva a tarefa que deseja planejar.', 'error');
                 return;
             }
+
+            registrarLog('PlanejadorTarefas', taskText);
+
             setLoadingState(button, 'task-text', 'Planejando...', true);
             statusDiv.classList.add('hidden');
             outputDiv.innerHTML = '<p>A IA está criando seu plano de ação...</p>';
@@ -698,6 +766,9 @@ window.MathJax = {
                 showStatus(statusDiv, 'Por favor, selecione um arquivo de imagem.', 'error');
                 return;
             }
+
+            registrarLog('DescritorImagens', 'Imagem enviada para análise');
+
             setLoadingState(button, 'describe-text', 'Analisando...', true);
             statusDiv.classList.add('hidden');
             outputDiv.innerHTML = '<p>A IA está observando a imagem...</p>';
@@ -750,6 +821,7 @@ window.MathJax = {
                 alert('Por favor, insira um texto para leitura.');
                 return;
             }
+            registrarLog('LeitorVoz', textToSpeak.substring(0, 100) + '...');
             speak(textToSpeak);
         }
         
@@ -779,7 +851,7 @@ window.MathJax = {
             setTimeout(() => {
                 currentUtterance = new SpeechSynthesisUtterance(text);
                 currentUtterance.lang = 'pt-BR';
-                currentUtterance.rate = 1; // Velocidade padrão
+                currentUtterance.rate = 1; 
                 currentUtterance.pitch = 1;
                 currentUtterance.volume = 1;
                 
