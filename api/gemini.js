@@ -1,84 +1,126 @@
+import { GoogleGenerativeAI } from '@google/generative-ai';
+
+// Função recursiva para extrair o texto de entrada sem falhas (Extrator Universal)
+function extrairTextoUniversal(obj) {
+  if (!obj) return null;
+  if (typeof obj === 'string' && obj.trim().length > 0) return obj;
+  if (typeof obj === 'number') return String(obj);
+  
+  if (Array.isArray(obj)) {
+    for (let i = obj.length - 1; i >= 0; i--) {
+      const res = extrairTextoUniversal(obj[i]);
+      if (res) return res;
+    }
+  }
+  
+  if (typeof obj === 'object') {
+    const chavesPrioritarias = ['text', 'content', 'prompt', 'mensagem', 'message', 'question', 'query', 'input', 'parts', 'contents', 'data', 'payload'];
+    for (const chave of chavesPrioritarias) {
+      if (obj[chave] !== undefined) {
+        const res = extrairTextoUniversal(obj[chave]);
+        if (res) return res;
+      }
+    }
+    for (const chave in obj) {
+      const res = extrairTextoUniversal(obj[chave]);
+      if (res && typeof res === 'string' && res.length > 1) return res;
+    }
+  }
+  return null;
+}
+
 export default async function handler(req, res) {
-  // 1. Garante que apenas requisições POST sejam aceitas
   if (req.method !== 'POST') {
     return res.status(405).json({ error: 'Método não permitido. Use POST.' });
   }
 
   try {
-    // 2. Busca a chave gratuita configurada no painel da Vercel
     const apiKey = process.env.GEMINI_API_KEY;
     if (!apiKey) {
       return res.status(500).json({ error: 'Chave GEMINI_API_KEY não encontrada nas variáveis de ambiente.' });
     }
 
-    // 3. Tratamento de segurança para conversão de corpo da requisição
     let body = req.body;
     if (typeof body === 'string') {
       try { body = JSON.parse(body); } catch (e) {}
     }
 
-    let prompt = null;
+    const prompt = extrairTextoUniversal(body);
 
-    // 4. EXTRAÇÃO EXATA DO FORMATO GOOGLE SDK (Confirmado pelo seu log)
-    if (body.contents && Array.isArray(body.contents) && body.contents.length > 0) {
-      const ultimaMensagem = body.contents[body.contents.length - 1];
-      if (ultimaMensagem.parts && Array.isArray(ultimaMensagem.parts) && ultimaMensagem.parts.length > 0) {
-        // Pega o texto de dentro do array 'parts'
-        prompt = ultimaMensagem.parts.map(p => p.text || '').join(' ').trim();
-      }
-    }
-
-    // Fallback de segurança: caso o texto venha em formatos simples (text, prompt, input)
     if (!prompt) {
-      prompt = body.prompt || body.text || body.mensagem || body.question || body.input;
-    }
-
-    // Se realmente não encontrar texto, interrompe a execução
-    if (!prompt) {
-      console.error('Falha ao extrair texto do payload:', JSON.stringify(body, null, 2));
+      console.error('Payload sem texto detectável:', JSON.stringify(body, null, 2));
       return res.status(400).json({ error: 'Nenhum texto detectável foi encontrado na requisição.' });
     }
 
-    // 5. Conexão DIRETA ao endpoint REST oficial do Google Gemini 1.5 Flash (Camada Gratuita)
-    const url = `https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key=${apiKey}`;
-    
-    const googleResponse = await fetch(url, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        contents: [{ parts: [{ text: String(prompt) }] }]
-      })
-    });
+    let textoGerado = '';
 
-    const data = await googleResponse.json();
+    // TENTATIVA 1: Via SDK Oficial (Evita erros de URL e de versão REST)
+    try {
+      const genAI = new GoogleGenerativeAI(apiKey);
+      const model = genAI.getGenerativeModel({ model: 'gemini-1.5-flash' });
+      const result = await model.generateContent(String(prompt));
+      const response = await result.response;
+      textoGerado = response.text();
+    } catch (sdkError) {
+      console.warn('Falha via SDK Oficial, ativando fallback REST estável [v1]:', sdkError.message);
+      
+      // TENTATIVA 2: Fallback via REST na API Estável (v1 em vez de v1beta) com variação de modelos
+      const modelosParaTestar = ['gemini-1.5-flash', 'gemini-1.5-flash-latest', 'gemini-1.5-flash-001'];
+      let erroRest = null;
 
-    // 6. Tratamento de erro vindo diretamente dos servidores do Google
-    if (!googleResponse.ok) {
-      throw new Error(data.error?.message || 'Falha na comunicação com o servidor do Google Gemini.');
+      for (const nomeModelo of modelosParaTestar) {
+        try {
+          const url = `https://generativelanguage.googleapis.com/v1/models/${nomeModelo}:generateContent?key=${apiKey}`;
+          const googleResponse = await fetch(url, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+              contents: [{ parts: [{ text: String(prompt) }] }]
+            })
+          });
+
+          const data = await googleResponse.json();
+
+          if (googleResponse.ok && data.candidates?.[0]?.content?.parts?.[0]?.text) {
+            textoGerado = data.candidates[0].content.parts[0].text;
+            erroRest = null;
+            break; 
+          } else {
+            erroRest = data.error?.message || `Erro no modelo ${nomeModelo}`;
+          }
+        } catch (e) {
+          erroRest = e.message;
+        }
+      }
+
+      if (erroRest && !textoGerado) {
+        throw new Error(`Falha em todos os endpoints de geração: ${erroRest}`);
+      }
     }
 
-    // 7. Extração do texto gerado pela IA
-    const textoGerado = data.candidates?.[0]?.content?.parts?.[0]?.text || '';
+    if (!textoGerado) {
+      throw new Error('O modelo respondeu com sucesso, mas retornou um texto vazio.');
+    }
 
-    // 8. RETORNO COMPLETO: Garante compatibilidade total na leitura do seu front-end
+    // Retorno multivariável e estruturado para total compatibilidade com o frontend
     return res.status(200).json({
       text: textoGerado,
       result: textoGerado,
       resposta: textoGerado,
       conteudo: textoGerado,
-      // Estrutura nativa do Google SDK:
       candidates: [
         {
           content: {
             parts: [{ text: textoGerado }],
-            role: "model"
+            role: 'model'
           }
         }
-      ]
+      ],
+      choices: [{ message: { content: textoGerado } }]
     });
 
   } catch (error) {
-    console.error('Erro no processamento [api/gemini.js]:', error);
+    console.error('Erro crítico no processamento [api/gemini.js]:', error);
     return res.status(500).json({ error: error.message || 'Erro interno no servidor.' });
   }
 }
