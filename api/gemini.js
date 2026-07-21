@@ -36,7 +36,7 @@ export default async function handler(req, res) {
   try {
     const apiKey = process.env.GEMINI_API_KEY;
     if (!apiKey) {
-      return res.status(500).json({ error: 'Chave GEMINI_API_KEY não encontrada na Vercel.' });
+      return res.status(500).json({ error: 'Chave GEMINI_API_KEY não encontrada nas variáveis de ambiente da Vercel.' });
     }
 
     let body = req.body;
@@ -47,53 +47,62 @@ export default async function handler(req, res) {
     const prompt = extrairTextoUniversal(body);
 
     if (!prompt) {
-      console.error('Payload sem texto detectável:', JSON.stringify(body, null, 2));
+      console.error('Payload recebido sem texto detectável:', JSON.stringify(body, null, 2));
       return res.status(400).json({ error: 'Nenhum texto detectável foi encontrado na requisição.' });
     }
 
-    // 2. Lista de endpoints REST oficiais da cota gratuita para verificação sequencial
-    // Testa variações entre /v1/ e /v1beta/ e sufixos de modelo para evitar falha de roteamento
-    const endpointsParaTestar = [
-      `https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash-latest:generateContent?key=${apiKey}`,
-      `https://generativelanguage.googleapis.com/v1/models/gemini-1.5-flash:generateContent?key=${apiKey}`,
-      `https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key=${apiKey}`,
-      `https://generativelanguage.googleapis.com/v1/models/gemini-1.5-flash-001:generateContent?key=${apiKey}`
-    ];
-
-    let textoGerado = '';
-    let ultimoErro = '';
-
-    // 3. Loop de Resiliência: Tenta conectar diretamente via fetch nativo
-    for (const url of endpointsParaTestar) {
-      try {
-        const googleResponse = await fetch(url, {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({
-            contents: [{ parts: [{ text: String(prompt) }] }]
-          })
-        });
-
-        const data = await googleResponse.json();
-
-        if (googleResponse.ok && data.candidates?.[0]?.content?.parts?.[0]?.text) {
-          textoGerado = data.candidates[0].content.parts[0].text;
-          ultimoErro = '';
-          break; // Sucesso: interrompe o loop
-        } else {
-          ultimoErro = data.error?.message || `Status HTTP ${googleResponse.status}`;
-        }
-      } catch (e) {
-        ultimoErro = e.message;
-      }
+    // --- PASSO A: AUTO-DESCOBERTA DE MODELO VIA API OFICIAL (ListModels) ---
+    const listModelsUrl = `https://generativelanguage.googleapis.com/v1beta/models?key=${apiKey}`;
+    const listResponse = await fetch(listModelsUrl);
+    
+    if (!listResponse.ok) {
+      const erroAuth = await listResponse.text();
+      throw new Error(`Falha ao validar chave API no Google (HTTP ${listResponse.status}): ${erroAuth}`);
     }
 
-    // Se todos os endpoints falharem, retorna o erro exato do Google
+    const listaDados = await listResponse.json();
+    const modelosDisponiveis = listaDados.models || [];
+
+    // Filtra apenas modelos que suportam geração de texto (generateContent)
+    const modelosGeradores = modelosDisponiveis.filter(m => 
+      m.supportedGenerationMethods && m.supportedGenerationMethods.includes('generateContent')
+    );
+
+    if (modelosGeradores.length === 0) {
+      throw new Error('A chave API fornecida é válida, mas não possui nenhum modelo de geração de texto habilitado no Google AI Studio.');
+    }
+
+    // Prioriza modelos da linha "flash" (mais rápidos e gratuitos). Se não achar, pega o primeiro gerador válido.
+    const modeloEscolhido = modelosGeradores.find(m => m.name.toLowerCase().includes('flash')) || modelosGeradores[0];
+    
+    // A propriedade .name já retorna no formato oficial exigido: ex: "models/gemini-1.5-flash"
+    const nomeModeloOficial = modeloEscolhido.name;
+    console.log(`[Auto-Descoberta] Modelo selecionado para execução: ${nomeModeloOficial}`);
+
+    // --- PASSO B: GERAÇÃO DE CONTEÚDO NO ENDPOINT DESCOBERTO ---
+    const generateUrl = `https://generativelanguage.googleapis.com/v1beta/${nomeModeloOficial}:generateContent?key=${apiKey}`;
+    
+    const googleResponse = await fetch(generateUrl, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        contents: [{ parts: [{ text: String(prompt) }] }]
+      })
+    });
+
+    const data = await googleResponse.json();
+
+    if (!googleResponse.ok) {
+      throw new Error(data.error?.message || `Erro HTTP ${googleResponse.status} na geração de conteúdo.`);
+    }
+
+    const textoGerado = data.candidates?.[0]?.content?.parts?.[0]?.text || '';
+
     if (!textoGerado) {
-      throw new Error(`Falha na comunicação REST com o Google Gemini: ${ultimoErro}`);
+      throw new Error('O modelo do Google processou a requisição, mas retornou uma resposta vazia.');
     }
 
-    // 4. Retorno estruturado para compatibilidade com qualquer front-end
+    // Retorno multivariável para compatibilidade perfeita com qualquer front-end
     return res.status(200).json({
       text: textoGerado,
       result: textoGerado,
