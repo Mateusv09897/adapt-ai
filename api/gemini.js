@@ -28,7 +28,6 @@ function extrairTextoUniversal(obj) {
 }
 
 export default async function handler(req, res) {
-  // Apenas aceita requisições POST
   if (req.method !== 'POST') {
     return res.status(405).json({ error: 'Método não permitido. Use POST.' });
   }
@@ -51,58 +50,92 @@ export default async function handler(req, res) {
       return res.status(400).json({ error: 'Nenhum texto detectável foi encontrado na requisição.' });
     }
 
-    // --- PASSO A: AUTO-DESCOBERTA DE MODELO VIA API OFICIAL (ListModels) ---
-    const listModelsUrl = `https://generativelanguage.googleapis.com/v1beta/models?key=${apiKey}`;
-    const listResponse = await fetch(listModelsUrl);
-    
-    if (!listResponse.ok) {
-      const erroAuth = await listResponse.text();
-      throw new Error(`Falha ao validar chave API no Google (HTTP ${listResponse.status}): ${erroAuth}`);
+    let textoGerado = '';
+    let ultimoErro = '';
+
+    // --- PASSO 1: TENTATIVA DIRETA NOS MODELOS ATUAIS (Série 3.5 Flash) ---
+    // Evita chamadas extras e vai direto nos modelos padrão ativos da cota gratuita
+    const modelosAtuais = ['gemini-3.5-flash', 'gemini-3.5-flash-lite', 'gemini-3.6-flash'];
+
+    for (const nomeModelo of modelosAtuais) {
+      try {
+        const url = `https://generativelanguage.googleapis.com/v1beta/models/${nomeModelo}:generateContent?key=${apiKey}`;
+        const googleResponse = await fetch(url, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            contents: [{ parts: [{ text: String(prompt) }] }]
+          })
+        });
+
+        const data = await googleResponse.json();
+
+        if (googleResponse.ok && data.candidates?.[0]?.content?.parts?.[0]?.text) {
+          textoGerado = data.candidates[0].content.parts[0].text;
+          console.log(`[Execução Direta] Sucesso com o modelo: ${nomeModelo}`);
+          break;
+        } else {
+          ultimoErro = data.error?.message || `Erro HTTP ${googleResponse.status}`;
+        }
+      } catch (e) {
+        ultimoErro = e.message;
+      }
     }
 
-    const listaDados = await listResponse.json();
-    const modelosDisponiveis = listaDados.models || [];
+    // --- PASSO 2: AUTO-DESCOBERTA COM FILTRO (Caso os modelos padrão falhem) ---
+    if (!textoGerado) {
+      console.warn(`[Fallback] Modelos padrão falharam (${ultimoErro}). Iniciando Auto-Descoberta...`);
+      
+      const listModelsUrl = `https://generativelanguage.googleapis.com/v1beta/models?key=${apiKey}`;
+      const listResponse = await fetch(listModelsUrl);
+      
+      if (!listResponse.ok) {
+        throw new Error(`Falha na listagem de modelos (HTTP ${listResponse.status}): ${await listResponse.text()}`);
+      }
 
-    // Filtra apenas modelos que suportam geração de texto (generateContent)
-    const modelosGeradores = modelosDisponiveis.filter(m => 
-      m.supportedGenerationMethods && m.supportedGenerationMethods.includes('generateContent')
-    );
+      const listaDados = await listResponse.json();
+      const modelosDisponiveis = listaDados.models || [];
 
-    if (modelosGeradores.length === 0) {
-      throw new Error('A chave API fornecida é válida, mas não possui nenhum modelo de geração de texto habilitado no Google AI Studio.');
+      // Filtra apenas modelos que geram texto e IGNORA versões antigas descontinuadas (séries 1.x e 2.x)
+      const modelosValidos = modelosDisponiveis.filter(m => 
+        m.supportedGenerationMethods && 
+        m.supportedGenerationMethods.includes('generateContent') &&
+        !m.name.includes('gemini-1.') && 
+        !m.name.includes('gemini-2.')
+      );
+
+      if (modelosValidos.length === 0) {
+        throw new Error(`Nenhum modelo da geração atual (3.x) está disponível para esta chave. Último erro: ${ultimoErro}`);
+      }
+
+      // Ordena em ordem decrescente para pegar sempre a versão mais nova (ex: 3.6 antes de 3.5)
+      modelosValidos.sort((a, b) => b.name.localeCompare(a.name));
+      
+      const modeloEscolhido = modelosValidos.find(m => m.name.toLowerCase().includes('flash')) || modelosValidos[0];
+      const nomeModeloOficial = modeloEscolhido.name;
+      
+      console.log(`[Auto-Descoberta] Modelo selecionado: ${nomeModeloOficial}`);
+
+      const generateUrl = `https://generativelanguage.googleapis.com/v1beta/${nomeModeloOficial}:generateContent?key=${apiKey}`;
+      const resp = await fetch(generateUrl, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ contents: [{ parts: [{ text: String(prompt) }] }] })
+      });
+
+      const dataResp = await resp.json();
+      if (!resp.ok) {
+        throw new Error(dataResp.error?.message || `Erro HTTP ${resp.status} em ${nomeModeloOficial}`);
+      }
+
+      textoGerado = dataResp.candidates?.[0]?.content?.parts?.[0]?.text || '';
     }
-
-    // Prioriza modelos da linha "flash" (mais rápidos e gratuitos). Se não achar, pega o primeiro gerador válido.
-    const modeloEscolhido = modelosGeradores.find(m => m.name.toLowerCase().includes('flash')) || modelosGeradores[0];
-    
-    // A propriedade .name já retorna no formato oficial exigido: ex: "models/gemini-1.5-flash"
-    const nomeModeloOficial = modeloEscolhido.name;
-    console.log(`[Auto-Descoberta] Modelo selecionado para execução: ${nomeModeloOficial}`);
-
-    // --- PASSO B: GERAÇÃO DE CONTEÚDO NO ENDPOINT DESCOBERTO ---
-    const generateUrl = `https://generativelanguage.googleapis.com/v1beta/${nomeModeloOficial}:generateContent?key=${apiKey}`;
-    
-    const googleResponse = await fetch(generateUrl, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        contents: [{ parts: [{ text: String(prompt) }] }]
-      })
-    });
-
-    const data = await googleResponse.json();
-
-    if (!googleResponse.ok) {
-      throw new Error(data.error?.message || `Erro HTTP ${googleResponse.status} na geração de conteúdo.`);
-    }
-
-    const textoGerado = data.candidates?.[0]?.content?.parts?.[0]?.text || '';
 
     if (!textoGerado) {
-      throw new Error('O modelo do Google processou a requisição, mas retornou uma resposta vazia.');
+      throw new Error('O modelo processou a requisição com sucesso, mas retornou um texto vazio.');
     }
 
-    // Retorno multivariável para compatibilidade perfeita com qualquer front-end
+    // Retorno multivariável e estruturado
     return res.status(200).json({
       text: textoGerado,
       result: textoGerado,
