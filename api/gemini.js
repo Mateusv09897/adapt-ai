@@ -11,30 +11,32 @@ export default async function handler(req, res) {
       return res.status(500).json({ error: 'Chave GEMINI_API_KEY não encontrada nas variáveis de ambiente.' });
     }
 
-    // 3. Tratamento de segurança: se o Vercel receber o corpo como string, faz o parse para JSON
+    // 3. Tratamento de segurança para conversão de corpo da requisição
     let body = req.body;
     if (typeof body === 'string') {
       try { body = JSON.parse(body); } catch (e) {}
     }
 
-    // 4. EXTRAÇÃO INTELIGENTE DO TEXTO (Suporta formatos simples e padrão OpenRouter/OpenAI)
-    let prompt = body.prompt || body.text || body.mensagem || body.question || body.input;
+    let prompt = null;
 
-    // Se não achou nas chaves simples, busca na estrutura de 'messages' (padrão OpenRouter)
-    if (!prompt && Array.isArray(body.messages) && body.messages.length > 0) {
-      // Pega o conteúdo da última mensagem enviada pelo usuário
-      const mensagensUsuario = body.messages.filter(m => m.role === 'user' || !m.role);
-      const ultimaMensagem = mensagensUsuario[mensagensUsuario.length - 1] || body.messages[body.messages.length - 1];
-      prompt = ultimaMensagem.content || ultimaMensagem.text || typeof ultimaMensagem === 'string' ? ultimaMensagem : JSON.stringify(ultimaMensagem);
+    // 4. EXTRAÇÃO EXATA DO FORMATO GOOGLE SDK (Confirmado pelo seu log)
+    if (body.contents && Array.isArray(body.contents) && body.contents.length > 0) {
+      const ultimaMensagem = body.contents[body.contents.length - 1];
+      if (ultimaMensagem.parts && Array.isArray(ultimaMensagem.parts) && ultimaMensagem.parts.length > 0) {
+        // Pega o texto de dentro do array 'parts'
+        prompt = ultimaMensagem.parts.map(p => p.text || '').join(' ').trim();
+      }
     }
 
-    // Se ainda assim estiver vazio, retorna o erro 400 mostrando o que recebeu para facilitar o debug
+    // Fallback de segurança: caso o texto venha em formatos simples (text, prompt, input)
     if (!prompt) {
-      console.error('Payload recebido sem formato reconhecido:', body);
-      return res.status(400).json({ 
-        error: 'Nenhum texto foi encontrado na requisição.', 
-        recebido: body 
-      });
+      prompt = body.prompt || body.text || body.mensagem || body.question || body.input;
+    }
+
+    // Se realmente não encontrar texto, interrompe a execução
+    if (!prompt) {
+      console.error('Falha ao extrair texto do payload:', JSON.stringify(body, null, 2));
+      return res.status(400).json({ error: 'Nenhum texto detectável foi encontrado na requisição.' });
     }
 
     // 5. Conexão DIRETA ao endpoint REST oficial do Google Gemini 1.5 Flash (Camada Gratuita)
@@ -58,13 +60,21 @@ export default async function handler(req, res) {
     // 7. Extração do texto gerado pela IA
     const textoGerado = data.candidates?.[0]?.content?.parts?.[0]?.text || '';
 
-    // 8. Retorno com múltiplas chaves para garantir leitura perfeita no seu index.html
+    // 8. RETORNO COMPLETO: Garante compatibilidade total na leitura do seu front-end
     return res.status(200).json({
       text: textoGerado,
       result: textoGerado,
       resposta: textoGerado,
       conteudo: textoGerado,
-      choices: [{ message: { content: textoGerado } }] // Compatibilidade com leitores estilo OpenRouter
+      // Estrutura nativa do Google SDK:
+      candidates: [
+        {
+          content: {
+            parts: [{ text: textoGerado }],
+            role: "model"
+          }
+        }
+      ]
     });
 
   } catch (error) {
