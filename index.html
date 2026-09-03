@@ -9,14 +9,11 @@
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet">
   <link rel="stylesheet" href="styles.css">
+  <style>
+    .participant-list{display:grid;gap:12px;margin-top:18px}.participant-row{display:grid;grid-template-columns:1fr auto;gap:16px;align-items:center;padding:16px;border:1px solid #e5eaf1;border-radius:16px;background:#f8fafc}.participant-main{display:flex;flex-direction:column;gap:4px}.participant-main strong{font-size:1rem;color:#12355b}.participant-main span{font-size:.88rem;color:#6b7b8e}.participant-actions{display:flex;gap:8px;flex-wrap:wrap}.danger-button{cursor:pointer;border-radius:12px;font:inherit;font-weight:800;padding:11px 14px;background:#fff;color:#a4362d;border:1px solid #e5b7b2}.danger-button:hover{background:#fff1f0;border-color:#ca756c}.management-note{margin-top:10px;color:#6b7b8e;font-size:.9rem}.modal-wide{width:min(680px,calc(100vw - 28px));max-height:80vh;overflow:auto}.session-list{display:grid;gap:10px;margin:18px 0}.session-row{display:grid;grid-template-columns:1fr auto;gap:12px;align-items:center;padding:14px;border:1px solid #e5eaf1;border-radius:14px;background:#f8fafc}.session-row strong{display:block;color:#12355b}.session-row small{display:block;color:#6b7b8e;margin-top:4px}.confirm-field{text-align:left;margin:18px 0}.confirm-field label{display:block;font-weight:700;margin-bottom:8px}.confirm-field input{width:100%;font:inherit;padding:14px 16px;border:2px solid #dce4ec;border-radius:14px;outline:none}.confirm-field input:focus{border-color:#2f6690;box-shadow:0 0 0 4px rgba(47,102,144,.1)}.modal-actions{display:flex;gap:10px;justify-content:flex-end;flex-wrap:wrap}.research-status{margin-top:12px;padding:12px 14px;border-radius:12px;background:#e7f6ef;color:#276c4d;font-weight:700}.research-status.error{background:#fff1f0;color:#9d3127}@media(max-width:680px){.participant-row,.session-row{grid-template-columns:1fr}.participant-actions,.modal-actions{align-items:stretch}.participant-actions button,.modal-actions button{width:100%}}
+  </style>
   <script>
-    window.MathJax = {
-      tex: {
-        inlineMath: [['$', '$'], ['\\(', '\\)']],
-        displayMath: [['$$', '$$'], ['\\[', '\\]']]
-      },
-      startup: { typeset: false }
-    };
+    window.MathJax={tex:{inlineMath:[['$','$'],['\\(','\\)']],displayMath:[['$$','$$'],['\\[','\\]']]},startup:{typeset:false}};
   </script>
   <script id="MathJax-script" async src="https://cdn.jsdelivr.net/npm/mathjax@3/es5/tex-mml-chtml.js"></script>
 </head>
@@ -25,20 +22,15 @@
     <header class="topbar">
       <button class="brand" type="button" onclick="goToBarrierScreen()" aria-label="Voltar ao início do Adapt">
         <img src="logo.png" alt="" class="brand-logo">
-        <span class="brand-copy">
-          <strong>Adapt</strong>
-          <small>Compreender para continuar</small>
-        </span>
+        <span class="brand-copy"><strong>Adapt</strong><small>Compreender para continuar</small></span>
       </button>
-
       <div class="topbar-actions">
+        <button id="research-dashboard-button" class="research-button hidden" type="button" onclick="openResearchDashboard()">📊 Painel</button>
         <div class="font-controls" aria-label="Controles de tamanho do texto">
           <button type="button" class="icon-button" onclick="changeInterfaceFont(-1)" aria-label="Diminuir texto">A−</button>
           <button type="button" class="icon-button" onclick="changeInterfaceFont(1)" aria-label="Aumentar texto">A+</button>
         </div>
-        <button id="end-session-button" class="secondary-button compact hidden" type="button" onclick="finishSession(false)">
-          Encerrar sessão
-        </button>
+        <button id="end-session-button" class="secondary-button compact hidden" type="button" onclick="finishSession(false)">Encerrar sessão</button>
       </div>
     </header>
 
@@ -48,13 +40,11 @@
           <div class="hero-badge">Mediação pedagógica com IA</div>
           <h1 id="start-title">Entenda o que está te impedindo de continuar.</h1>
           <p class="hero-text">O Adapt oferece uma ajuda rápida para remover uma barreira de compreensão. Ele não faz a atividade por você.</p>
-
           <div class="principle-strip" aria-label="Como o Adapt funciona">
             <div><span>1</span><strong>Identifique a barreira</strong></div>
             <div><span>2</span><strong>Receba uma mediação</strong></div>
             <div><span>3</span><strong>Volte para sua atividade</strong></div>
           </div>
-
           <div class="session-start">
             <label for="participant-code">Código do participante <span>(quando estiver em pesquisa)</span></label>
             <input id="participant-code" type="text" maxlength="20" autocomplete="off" placeholder="Ex.: A023">
@@ -67,145 +57,101 @@
       </section>
 
       <section id="barrier-screen" class="screen" aria-labelledby="barrier-title">
-        <div class="section-heading">
-          <span class="eyebrow">Ajuda rápida</span>
-          <h1 id="barrier-title">O que está dificultando sua aprendizagem agora?</h1>
-          <p>Escolha apenas a barreira que está impedindo você de continuar neste momento.</p>
-        </div>
-
+        <div class="section-heading"><span class="eyebrow">Ajuda rápida</span><h1 id="barrier-title">O que está dificultando sua aprendizagem agora?</h1><p>Escolha apenas a barreira que está impedindo você de continuar neste momento.</p></div>
         <div class="barrier-grid">
-          <button class="barrier-card" type="button" data-module="simplify" onclick="selectModule('simplify')">
-            <span class="barrier-icon" aria-hidden="true">Aa</span>
-            <span class="barrier-copy"><strong>O texto está difícil</strong><small>Simplifique a linguagem sem perder o conceito.</small></span>
-            <span class="arrow">→</span>
-          </button>
-
-          <button class="barrier-card" type="button" data-module="context" onclick="selectModule('context')">
-            <span class="barrier-icon" aria-hidden="true">↗</span>
-            <span class="barrier-copy"><strong>Não entendo para que isso serve</strong><small>Conecte o conteúdo à vida real e ao mundo do trabalho.</small></span>
-            <span class="arrow">→</span>
-          </button>
-
-          <button class="barrier-card" type="button" data-module="image" onclick="selectModule('image')">
-            <span class="barrier-icon" aria-hidden="true">◫</span>
-            <span class="barrier-copy"><strong>Não entendi a imagem</strong><small>Descubra onde olhar e o que a representação comunica.</small></span>
-            <span class="arrow">→</span>
-          </button>
-
-          <button class="barrier-card" type="button" data-module="starter" onclick="selectModule('starter')">
-            <span class="barrier-icon" aria-hidden="true">1→</span>
-            <span class="barrier-copy"><strong>Não sei por onde começar</strong><small>Organize a tarefa e descubra somente o próximo passo.</small></span>
-            <span class="arrow">→</span>
-          </button>
-
-          <button class="barrier-card" type="button" data-module="voice" onclick="selectModule('voice')">
-            <span class="barrier-icon" aria-hidden="true">▶</span>
-            <span class="barrier-copy"><strong>Prefiro ouvir</strong><small>Escute um trecho para facilitar o acesso ao conteúdo.</small></span>
-            <span class="arrow">→</span>
-          </button>
+          <button class="barrier-card" type="button" onclick="selectModule('simplify')"><span class="barrier-icon">Aa</span><span class="barrier-copy"><strong>O texto está difícil</strong><small>Simplifique a linguagem sem perder o conceito.</small></span><span class="arrow">→</span></button>
+          <button class="barrier-card" type="button" onclick="selectModule('context')"><span class="barrier-icon">↗</span><span class="barrier-copy"><strong>Não entendo para que isso serve</strong><small>Conecte o conteúdo à vida real e ao mundo do trabalho.</small></span><span class="arrow">→</span></button>
+          <button class="barrier-card" type="button" onclick="selectModule('image')"><span class="barrier-icon">◫</span><span class="barrier-copy"><strong>Não entendi a imagem</strong><small>Descubra onde olhar e o que a representação comunica.</small></span><span class="arrow">→</span></button>
+          <button class="barrier-card" type="button" onclick="selectModule('starter')"><span class="barrier-icon">1→</span><span class="barrier-copy"><strong>Não sei por onde começar</strong><small>Organize a tarefa e descubra somente o próximo passo.</small></span><span class="arrow">→</span></button>
+          <button class="barrier-card" type="button" onclick="selectModule('voice')"><span class="barrier-icon">▶</span><span class="barrier-copy"><strong>Prefiro ouvir</strong><small>Escute um trecho para facilitar o acesso ao conteúdo.</small></span><span class="arrow">→</span></button>
         </div>
-
-        <div class="totem-note">
-          <strong>O Adapt é um ponto de apoio.</strong>
-          <span>Use o tempo que precisar para destravar a dificuldade e, quando conseguir, volte para sua atividade.</span>
-        </div>
+        <div class="totem-note"><strong>O Adapt é um ponto de apoio.</strong><span>Use o tempo que precisar para destravar a dificuldade e, quando conseguir, volte para sua atividade.</span></div>
       </section>
 
       <section id="help-screen" class="screen" aria-labelledby="module-title">
         <button class="back-button" type="button" onclick="goToBarrierScreen()">← Escolher outra dificuldade</button>
-
         <div class="workspace">
-          <div class="workspace-header">
-            <div id="module-symbol" class="workspace-symbol">Aa</div>
-            <div>
-              <span class="eyebrow">Sua dificuldade</span>
-              <h1 id="module-title">O texto está difícil</h1>
-              <p id="module-description">Cole somente o trecho que está impedindo você de continuar.</p>
-            </div>
-          </div>
-
-          <div id="panel-simplify" class="module-panel">
-            <label for="simplify-input">Trecho que você quer compreender</label>
-            <textarea id="simplify-input" rows="7" placeholder="Cole aqui o trecho difícil..."></textarea>
-            <button id="simplify-button" class="primary-button" type="button" onclick="requestMediation('simplify')">Ajudar a compreender</button>
-          </div>
-
-          <div id="panel-context" class="module-panel hidden">
-            <label for="context-input">Conceito ou assunto</label>
-            <textarea id="context-input" rows="5" placeholder="Ex.: entalpia, ligações químicas, pH..."></textarea>
-            <button id="context-button" class="primary-button" type="button" onclick="requestMediation('context')">Conectar com a realidade</button>
-          </div>
-
-          <div id="panel-image" class="module-panel hidden">
-            <label>Imagem que está difícil de interpretar</label>
-            <div class="upload-zone" onclick="document.getElementById('image-input').click()" onkeydown="if(event.key==='Enter'||event.key===' '){event.preventDefault();document.getElementById('image-input').click();}" role="button" tabindex="0">
-              <input id="image-input" class="hidden" type="file" accept="image/*" onchange="handleFileSelect(event)">
-              <img id="image-preview" class="hidden" alt="Pré-visualização da imagem selecionada">
-              <div id="image-placeholder" class="upload-placeholder">
-                <strong>Toque para selecionar uma imagem</strong>
-                <span>Fotografia, diagrama, fluxograma ou esquema.</span>
-              </div>
-            </div>
-            <button id="image-button" class="primary-button" type="button" onclick="requestMediation('image')">Ajudar a interpretar</button>
-          </div>
-
-          <div id="panel-starter" class="module-panel hidden">
-            <label for="starter-input">O que o professor pediu?</label>
-            <textarea id="starter-input" rows="6" placeholder="Ex.: Explique as etapas do tratamento de água e faça um esquema."></textarea>
-            <button id="starter-button" class="primary-button" type="button" onclick="requestMediation('starter')">Descobrir meu próximo passo</button>
-          </div>
-
-          <div id="panel-voice" class="module-panel hidden">
-            <label for="voice-input">Texto que você prefere ouvir</label>
-            <textarea id="voice-input" rows="7" placeholder="Digite ou cole o texto..."></textarea>
-            <div class="voice-actions">
-              <button class="primary-button" type="button" onclick="playVoiceText()">▶ Ouvir</button>
-              <button class="secondary-button" type="button" onclick="stopText()">■ Parar</button>
-            </div>
-          </div>
-
+          <div class="workspace-header"><div id="module-symbol" class="workspace-symbol">Aa</div><div><span class="eyebrow">Sua dificuldade</span><h1 id="module-title">O texto está difícil</h1><p id="module-description">Cole somente o trecho que está impedindo você de continuar.</p></div></div>
+          <div id="panel-simplify" class="module-panel"><label for="simplify-input">Trecho que você quer compreender</label><textarea id="simplify-input" rows="7" placeholder="Cole aqui o trecho difícil..."></textarea><button id="simplify-button" class="primary-button" type="button" onclick="requestMediation('simplify')">Ajudar a compreender</button></div>
+          <div id="panel-context" class="module-panel hidden"><label for="context-input">Conceito ou assunto</label><textarea id="context-input" rows="5" placeholder="Ex.: entalpia, ligações químicas, pH..."></textarea><button id="context-button" class="primary-button" type="button" onclick="requestMediation('context')">Conectar com a realidade</button></div>
+          <div id="panel-image" class="module-panel hidden"><label>Imagem que está difícil de interpretar</label><div class="upload-zone" onclick="document.getElementById('image-input').click()" onkeydown="if(event.key==='Enter'||event.key===' '){event.preventDefault();document.getElementById('image-input').click();}" role="button" tabindex="0"><input id="image-input" class="hidden" type="file" accept="image/*" onchange="handleFileSelect(event)"><img id="image-preview" class="hidden" alt="Pré-visualização da imagem selecionada"><div id="image-placeholder" class="upload-placeholder"><strong>Toque para selecionar uma imagem</strong><span>Fotografia, diagrama, fluxograma ou esquema.</span></div></div><button id="image-button" class="primary-button" type="button" onclick="requestMediation('image')">Ajudar a interpretar</button></div>
+          <div id="panel-starter" class="module-panel hidden"><label for="starter-input">O que o professor pediu?</label><textarea id="starter-input" rows="6" placeholder="Ex.: Explique as etapas do tratamento de água e faça um esquema."></textarea><button id="starter-button" class="primary-button" type="button" onclick="requestMediation('starter')">Descobrir meu próximo passo</button></div>
+          <div id="panel-voice" class="module-panel hidden"><label for="voice-input">Texto que você prefere ouvir</label><textarea id="voice-input" rows="7" placeholder="Digite ou cole o texto..."></textarea><div class="voice-actions"><button class="primary-button" type="button" onclick="playVoiceText()">▶ Ouvir</button><button class="secondary-button" type="button" onclick="stopText()">■ Parar</button></div></div>
           <div id="status-message" class="status-message hidden" role="status"></div>
         </div>
-
         <article id="result-card" class="result-card hidden" aria-live="polite">
-          <div class="result-heading">
-            <div>
-              <span class="eyebrow">Mediação do Adapt</span>
-              <h2>Uma ajuda para você continuar</h2>
-            </div>
-            <button class="listen-button" type="button" onclick="narrateResult()" aria-label="Ouvir esta mediação">▶ Ouvir</button>
-          </div>
-
+          <div class="result-heading"><div><span class="eyebrow">Mediação do Adapt</span><h2>Uma ajuda para você continuar</h2></div><button class="listen-button" type="button" onclick="narrateResult()">▶ Ouvir</button></div>
           <div id="result-output" class="result-output"></div>
-
-          <div class="return-question">
-            <strong>Você já consegue voltar para sua atividade?</strong>
-            <p>O objetivo é continuar o raciocínio fora do totem.</p>
-            <div class="return-actions">
-              <button class="success-button" type="button" onclick="markReturnToActivity()">Sim, consigo continuar</button>
-              <button id="more-help-button" class="secondary-button" type="button" onclick="requestMoreHelp()">Ainda preciso de uma pista</button>
-            </div>
-          </div>
+          <div class="return-question"><strong>Você já consegue voltar para sua atividade?</strong><p>O objetivo é continuar o raciocínio fora do totem.</p><div class="return-actions"><button class="success-button" type="button" onclick="markReturnToActivity()">Sim, consigo continuar</button><button id="more-help-button" class="secondary-button" type="button" onclick="requestMoreHelp()">Ainda preciso de uma pista</button></div></div>
         </article>
       </section>
 
       <section id="complete-screen" class="screen" aria-labelledby="complete-title">
-        <div class="complete-card">
-          <div class="complete-icon">✓</div>
-          <span class="eyebrow">Mediação concluída</span>
-          <h1 id="complete-title">Agora continue tentando por conta própria.</h1>
-          <p>O Adapt removeu uma barreira. O raciocínio e a construção da resposta continuam com você.</p>
-          <button class="primary-button large" type="button" onclick="prepareNextStudent()">Próximo estudante</button>
+        <div class="complete-card"><div class="complete-icon">✓</div><span class="eyebrow">Mediação concluída</span><h1 id="complete-title">Agora continue tentando por conta própria.</h1><p>O Adapt removeu uma barreira. O raciocínio e a construção da resposta continuam com você.</p><button class="primary-button large" type="button" onclick="prepareNextStudent()">Próximo estudante</button></div>
+      </section>
+
+      <section id="research-screen" class="screen" aria-labelledby="research-title">
+        <div class="research-header">
+          <div><span class="eyebrow">Área reservada do pesquisador</span><h1 id="research-title">Adapt Research</h1><p>Indicadores descritivos dos logs armazenados neste dispositivo. Sessões de teste não entram nas métricas de pesquisa.</p></div>
+          <button class="secondary-button" type="button" onclick="closeResearchDashboard()">← Voltar ao Adapt</button>
         </div>
+        <div class="metric-grid">
+          <article class="metric-card"><span>Participantes</span><strong id="metric-participants">0</strong><small>Códigos distintos</small></article>
+          <article class="metric-card"><span>Sessões</span><strong id="metric-sessions">0</strong><small>Sessões iniciadas</small></article>
+          <article class="metric-card"><span>Mediações</span><strong id="metric-mediations">0</strong><small>Primeiras mediações</small></article>
+          <article class="metric-card"><span>Retorno à atividade</span><strong id="metric-return-rate">0%</strong><small>Entre sessões com mediação</small></article>
+          <article class="metric-card"><span>Média de ajuda</span><strong id="metric-help-level">0</strong><small>Nível máximo por sessão</small></article>
+          <article class="metric-card"><span>Tempo médio</span><strong id="metric-duration">0s</strong><small>Sessões encerradas</small></article>
+        </div>
+        <div class="research-grid">
+          <article class="research-card"><div class="card-title"><div><span class="eyebrow">Barreiras</span><h2>Mais selecionadas</h2></div></div><div id="barrier-chart" class="bar-chart"></div></article>
+          <article class="research-card"><div class="card-title"><div><span class="eyebrow">Mediação</span><h2>Níveis de ajuda</h2></div></div><div id="help-chart" class="bar-chart"></div></article>
+        </div>
+
+        <article class="research-card">
+          <div class="card-title">
+            <div><span class="eyebrow">Privacidade e gestão</span><h2>Gerenciar participantes</h2><p>Consulte sessões por código e remova registros inválidos ou dados de um participante quando necessário.</p></div>
+          </div>
+          <div id="participant-list" class="participant-list"></div>
+          <p class="management-note">As exclusões realizadas aqui afetam apenas os dados armazenados neste dispositivo. Na futura versão com banco de dados, esta mesma ação será aplicada ao armazenamento central.</p>
+          <div id="research-status" class="research-status hidden" role="status"></div>
+        </article>
+
+        <article class="research-card export-card">
+          <div><span class="eyebrow">Dados locais</span><h2>Exportar para análise</h2><p>O CSV contém apenas campos estruturados dos eventos. O Adapt não inclui o texto digitado pelo estudante nesses logs.</p></div>
+          <div class="export-actions"><button class="primary-button" type="button" onclick="exportResearchCsv()">Exportar pesquisa (.csv)</button><button class="secondary-button" type="button" onclick="exportResearchJson()">Pesquisa (.json)</button><button class="secondary-button" type="button" onclick="exportTestJson()">Testes (.json)</button><button class="danger-button" type="button" onclick="requestClearTestLogs()">Apagar todos os testes</button></div>
+        </article>
+        <div class="research-warning"><strong>Importante:</strong> estes indicadores são descritivos de uso. Eles não devem ser interpretados isoladamente como uma medida direta de autonomia discente.</div>
       </section>
     </main>
 
-    <footer class="footer">
-      <span>Adapt — ferramenta de mediação pedagógica</span>
-      <span>O Adapt orienta a compreensão; não substitui o professor nem realiza a atividade.</span>
-    </footer>
+    <footer class="footer"><span>Adapt — ferramenta de mediação pedagógica</span><span>O Adapt orienta a compreensão; não substitui o professor nem realiza a atividade.</span></footer>
+  </div>
+
+  <div id="idle-overlay" class="modal-overlay hidden" role="dialog" aria-modal="true" aria-labelledby="idle-title">
+    <div class="modal-card"><div class="modal-icon">🔒</div><h2 id="idle-title">Esta sessão ainda está sendo usada?</h2><p>Para proteger a privacidade no tablet compartilhado, a sessão será encerrada automaticamente após mais 2 minutos sem interação.</p><button class="primary-button large" type="button" onclick="continueIdleSession()">Sim, continuar sessão</button><button class="text-button" type="button" onclick="finishSession(false)">Encerrar agora</button></div>
+  </div>
+
+  <div id="participant-details-overlay" class="modal-overlay hidden" role="dialog" aria-modal="true" aria-labelledby="participant-details-title">
+    <div class="modal-card modal-wide">
+      <h2 id="participant-details-title">Dados do participante</h2>
+      <p id="participant-details-summary"></p>
+      <div id="participant-session-list" class="session-list"></div>
+      <div class="modal-actions"><button class="secondary-button" type="button" onclick="closeParticipantDetails()">Fechar</button><button id="delete-participant-from-details" class="danger-button" type="button">Excluir todos os dados</button></div>
+    </div>
+  </div>
+
+  <div id="delete-confirm-overlay" class="modal-overlay hidden" role="dialog" aria-modal="true" aria-labelledby="delete-confirm-title">
+    <div class="modal-card modal-wide">
+      <div class="modal-icon">⚠️</div>
+      <h2 id="delete-confirm-title">Confirmar exclusão</h2>
+      <p id="delete-confirm-message"></p>
+      <div class="confirm-field"><label id="delete-confirm-label" for="delete-confirm-input">Digite o código para confirmar</label><input id="delete-confirm-input" type="text" autocomplete="off" oninput="validateDeletionConfirmation()"></div>
+      <div class="modal-actions"><button class="secondary-button" type="button" onclick="cancelDeletion()">Cancelar</button><button id="delete-confirm-button" class="danger-button" type="button" onclick="executeDeletion()" disabled>Excluir definitivamente</button></div>
+    </div>
   </div>
 
   <script src="app.js"></script>
+  <script src="csv-export-fix.js"></script>
 </body>
 </html>
