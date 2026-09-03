@@ -1,159 +1,112 @@
-// 1. Extrator Universal: Vasculha qualquer payload JSON em busca do texto da pergunta
-function extrairTextoUniversal(obj) {
+const PEDAGOGICAL_GUARDRAIL = `Você é o motor do Adapt, uma ferramenta de mediação pedagógica para estudantes da Educação Profissional e Tecnológica. Sua finalidade é ajudar o estudante a superar uma barreira de compreensão sem executar a atividade por ele. Nunca entregue respostas finais de exercícios, provas ou trabalhos; nunca escreva um trabalho pronto para entrega; nunca substitua o raciocínio do estudante. Prefira linguagem acessível, pistas graduais, exemplos análogos, decomposição de dificuldades e perguntas orientadoras. A resposta deve ser curta e adequada a um totem compartilhado em sala de aula. Quando possível, finalize devolvendo o estudante à própria atividade.`;
+
+function extractContents(body) {
+  if (!body || typeof body !== 'object') return null;
+  if (Array.isArray(body.contents) && body.contents.length) return body.contents;
+  return null;
+}
+
+function extractText(obj) {
   if (!obj) return null;
-  if (typeof obj === 'string' && obj.trim().length > 0) return obj;
-  if (typeof obj === 'number') return String(obj);
-  
+  if (typeof obj === 'string' && obj.trim()) return obj;
   if (Array.isArray(obj)) {
     for (let i = obj.length - 1; i >= 0; i--) {
-      const res = extrairTextoUniversal(obj[i]);
-      if (res) return res;
+      const found = extractText(obj[i]);
+      if (found) return found;
     }
   }
-  
   if (typeof obj === 'object') {
-    const chavesPrioritarias = ['text', 'content', 'prompt', 'mensagem', 'message', 'question', 'query', 'input', 'parts', 'contents', 'data', 'payload'];
-    for (const chave of chavesPrioritarias) {
-      if (obj[chave] !== undefined) {
-        const res = extrairTextoUniversal(obj[chave]);
-        if (res) return res;
+    const priority = ['text','content','prompt','mensagem','message','question','query','input','parts','contents','data','payload'];
+    for (const key of priority) {
+      if (obj[key] !== undefined) {
+        const found = extractText(obj[key]);
+        if (found) return found;
       }
     }
-    for (const chave in obj) {
-      const res = extrairTextoUniversal(obj[chave]);
-      if (res && typeof res === 'string' && res.length > 1) return res;
+    for (const key of Object.keys(obj)) {
+      const found = extractText(obj[key]);
+      if (found) return found;
     }
   }
   return null;
 }
 
+function withGuardrail(contents) {
+  const normalized = JSON.parse(JSON.stringify(contents));
+  const firstUser = normalized.find(item => item.role === 'user') || normalized[0];
+  if (!firstUser.parts) firstUser.parts = [];
+  firstUser.parts.unshift({ text: PEDAGOGICAL_GUARDRAIL });
+  return normalized;
+}
+
+async function generate(apiKey, modelName, contents) {
+  const url = `https://generativelanguage.googleapis.com/v1beta/models/${modelName}:generateContent?key=${apiKey}`;
+  const response = await fetch(url, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ contents })
+  });
+  const data = await response.json();
+  if (!response.ok) throw new Error(data.error?.message || `Erro HTTP ${response.status}`);
+  const text = data.candidates?.[0]?.content?.parts?.map(part => part.text || '').join('\n').trim();
+  if (!text) throw new Error('O modelo não retornou texto.');
+  return text;
+}
+
 export default async function handler(req, res) {
-  if (req.method !== 'POST') {
-    return res.status(405).json({ error: 'Método não permitido. Use POST.' });
-  }
+  if (req.method !== 'POST') return res.status(405).json({ error: 'Método não permitido. Use POST.' });
 
   try {
     const apiKey = process.env.GEMINI_API_KEY;
-    if (!apiKey) {
-      return res.status(500).json({ error: 'Chave GEMINI_API_KEY não encontrada nas variáveis de ambiente da Vercel.' });
-    }
+    if (!apiKey) return res.status(500).json({ error: 'GEMINI_API_KEY não configurada.' });
 
     let body = req.body;
     if (typeof body === 'string') {
-      try { body = JSON.parse(body); } catch (e) {}
+      try { body = JSON.parse(body); } catch { body = { text: body }; }
     }
 
-    const prompt = extrairTextoUniversal(body);
-
-    if (!prompt) {
-      console.error('Payload recebido sem texto detectável:', JSON.stringify(body, null, 2));
-      return res.status(400).json({ error: 'Nenhum texto detectável foi encontrado na requisição.' });
+    let contents = extractContents(body);
+    if (!contents) {
+      const text = extractText(body);
+      if (!text) return res.status(400).json({ error: 'Nenhum conteúdo detectável foi encontrado.' });
+      contents = [{ role: 'user', parts: [{ text }] }];
     }
 
-    let textoGerado = '';
-    let ultimoErro = '';
+    contents = withGuardrail(contents);
 
-    // --- PASSO 1: TENTATIVA DIRETA NOS MODELOS ATUAIS (Série 3.5 Flash) ---
-    // Evita chamadas extras e vai direto nos modelos padrão ativos da cota gratuita
-    const modelosAtuais = ['gemini-3.5-flash', 'gemini-3.5-flash-lite', 'gemini-3.6-flash'];
+    const preferredModels = ['gemini-3.5-flash','gemini-3.5-flash-lite','gemini-3.6-flash'];
+    let generatedText = '';
+    let lastError = null;
 
-    for (const nomeModelo of modelosAtuais) {
+    for (const model of preferredModels) {
       try {
-        const url = `https://generativelanguage.googleapis.com/v1beta/models/${nomeModelo}:generateContent?key=${apiKey}`;
-        const googleResponse = await fetch(url, {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({
-            contents: [{ parts: [{ text: String(prompt) }] }]
-          })
-        });
-
-        const data = await googleResponse.json();
-
-        if (googleResponse.ok && data.candidates?.[0]?.content?.parts?.[0]?.text) {
-          textoGerado = data.candidates[0].content.parts[0].text;
-          console.log(`[Execução Direta] Sucesso com o modelo: ${nomeModelo}`);
-          break;
-        } else {
-          ultimoErro = data.error?.message || `Erro HTTP ${googleResponse.status}`;
-        }
-      } catch (e) {
-        ultimoErro = e.message;
+        generatedText = await generate(apiKey, model, contents);
+        if (generatedText) break;
+      } catch (error) {
+        lastError = error;
       }
     }
 
-    // --- PASSO 2: AUTO-DESCOBERTA COM FILTRO (Caso os modelos padrão falhem) ---
-    if (!textoGerado) {
-      console.warn(`[Fallback] Modelos padrão falharam (${ultimoErro}). Iniciando Auto-Descoberta...`);
-      
-      const listModelsUrl = `https://generativelanguage.googleapis.com/v1beta/models?key=${apiKey}`;
-      const listResponse = await fetch(listModelsUrl);
-      
-      if (!listResponse.ok) {
-        throw new Error(`Falha na listagem de modelos (HTTP ${listResponse.status}): ${await listResponse.text()}`);
-      }
-
-      const listaDados = await listResponse.json();
-      const modelosDisponiveis = listaDados.models || [];
-
-      // Filtra apenas modelos que geram texto e IGNORA versões antigas descontinuadas (séries 1.x e 2.x)
-      const modelosValidos = modelosDisponiveis.filter(m => 
-        m.supportedGenerationMethods && 
-        m.supportedGenerationMethods.includes('generateContent') &&
-        !m.name.includes('gemini-1.') && 
-        !m.name.includes('gemini-2.')
-      );
-
-      if (modelosValidos.length === 0) {
-        throw new Error(`Nenhum modelo da geração atual (3.x) está disponível para esta chave. Último erro: ${ultimoErro}`);
-      }
-
-      // Ordena em ordem decrescente para pegar sempre a versão mais nova (ex: 3.6 antes de 3.5)
-      modelosValidos.sort((a, b) => b.name.localeCompare(a.name));
-      
-      const modeloEscolhido = modelosValidos.find(m => m.name.toLowerCase().includes('flash')) || modelosValidos[0];
-      const nomeModeloOficial = modeloEscolhido.name;
-      
-      console.log(`[Auto-Descoberta] Modelo selecionado: ${nomeModeloOficial}`);
-
-      const generateUrl = `https://generativelanguage.googleapis.com/v1beta/${nomeModeloOficial}:generateContent?key=${apiKey}`;
-      const resp = await fetch(generateUrl, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ contents: [{ parts: [{ text: String(prompt) }] }] })
-      });
-
-      const dataResp = await resp.json();
-      if (!resp.ok) {
-        throw new Error(dataResp.error?.message || `Erro HTTP ${resp.status} em ${nomeModeloOficial}`);
-      }
-
-      textoGerado = dataResp.candidates?.[0]?.content?.parts?.[0]?.text || '';
+    if (!generatedText) {
+      const listResponse = await fetch(`https://generativelanguage.googleapis.com/v1beta/models?key=${apiKey}`);
+      if (!listResponse.ok) throw lastError || new Error('Não foi possível localizar um modelo disponível.');
+      const listData = await listResponse.json();
+      const available = (listData.models || [])
+        .filter(model => model.supportedGenerationMethods?.includes('generateContent'))
+        .filter(model => !model.name.includes('gemini-1.') && !model.name.includes('gemini-2.'))
+        .sort((a,b) => b.name.localeCompare(a.name));
+      const selected = available.find(model => model.name.toLowerCase().includes('flash')) || available[0];
+      if (!selected) throw lastError || new Error('Nenhum modelo compatível está disponível.');
+      generatedText = await generate(apiKey, selected.name.replace('models/',''), contents);
     }
 
-    if (!textoGerado) {
-      throw new Error('O modelo processou a requisição com sucesso, mas retornou um texto vazio.');
-    }
-
-    // Retorno multivariável e estruturado
     return res.status(200).json({
-      text: textoGerado,
-      result: textoGerado,
-      resposta: textoGerado,
-      conteudo: textoGerado,
-      candidates: [
-        {
-          content: {
-            parts: [{ text: textoGerado }],
-            role: 'model'
-          }
-        }
-      ],
-      choices: [{ message: { content: textoGerado } }]
+      text: generatedText,
+      result: generatedText,
+      candidates: [{ content: { parts: [{ text: generatedText }], role: 'model' } }]
     });
-
   } catch (error) {
-    console.error('Erro crítico no processamento [api/gemini.js]:', error);
+    console.error('Erro no Adapt API:', error);
     return res.status(500).json({ error: error.message || 'Erro interno no servidor.' });
   }
 }
