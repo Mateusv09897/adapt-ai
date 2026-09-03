@@ -9,6 +9,9 @@
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet">
   <link rel="stylesheet" href="styles.css">
+  <style>
+    .participant-list{display:grid;gap:12px;margin-top:18px}.participant-row{display:grid;grid-template-columns:1fr auto;gap:16px;align-items:center;padding:16px;border:1px solid #e5eaf1;border-radius:16px;background:#f8fafc}.participant-main{display:flex;flex-direction:column;gap:4px}.participant-main strong{font-size:1rem;color:#12355b}.participant-main span{font-size:.88rem;color:#6b7b8e}.participant-actions{display:flex;gap:8px;flex-wrap:wrap}.danger-button{cursor:pointer;border-radius:12px;font:inherit;font-weight:800;padding:11px 14px;background:#fff;color:#a4362d;border:1px solid #e5b7b2}.danger-button:hover{background:#fff1f0;border-color:#ca756c}.management-note{margin-top:10px;color:#6b7b8e;font-size:.9rem}.modal-wide{width:min(680px,calc(100vw - 28px));max-height:80vh;overflow:auto}.session-list{display:grid;gap:10px;margin:18px 0}.session-row{display:grid;grid-template-columns:1fr auto;gap:12px;align-items:center;padding:14px;border:1px solid #e5eaf1;border-radius:14px;background:#f8fafc}.session-row strong{display:block;color:#12355b}.session-row small{display:block;color:#6b7b8e;margin-top:4px}.confirm-field{text-align:left;margin:18px 0}.confirm-field label{display:block;font-weight:700;margin-bottom:8px}.confirm-field input{width:100%;font:inherit;padding:14px 16px;border:2px solid #dce4ec;border-radius:14px;outline:none}.confirm-field input:focus{border-color:#2f6690;box-shadow:0 0 0 4px rgba(47,102,144,.1)}.modal-actions{display:flex;gap:10px;justify-content:flex-end;flex-wrap:wrap}.research-status{margin-top:12px;padding:12px 14px;border-radius:12px;background:#e7f6ef;color:#276c4d;font-weight:700}.research-status.error{background:#fff1f0;color:#9d3127}@media(max-width:680px){.participant-row,.session-row{grid-template-columns:1fr}.participant-actions,.modal-actions{align-items:stretch}.participant-actions button,.modal-actions button{width:100%}}
+  </style>
   <script>
     window.MathJax={tex:{inlineMath:[['$','$'],['\\(','\\)']],displayMath:[['$$','$$'],['\\[','\\]']]},startup:{typeset:false}};
   </script>
@@ -54,11 +57,7 @@
       </section>
 
       <section id="barrier-screen" class="screen" aria-labelledby="barrier-title">
-        <div class="section-heading">
-          <span class="eyebrow">Ajuda rápida</span>
-          <h1 id="barrier-title">O que está dificultando sua aprendizagem agora?</h1>
-          <p>Escolha apenas a barreira que está impedindo você de continuar neste momento.</p>
-        </div>
+        <div class="section-heading"><span class="eyebrow">Ajuda rápida</span><h1 id="barrier-title">O que está dificultando sua aprendizagem agora?</h1><p>Escolha apenas a barreira que está impedindo você de continuar neste momento.</p></div>
         <div class="barrier-grid">
           <button class="barrier-card" type="button" onclick="selectModule('simplify')"><span class="barrier-icon">Aa</span><span class="barrier-copy"><strong>O texto está difícil</strong><small>Simplifique a linguagem sem perder o conceito.</small></span><span class="arrow">→</span></button>
           <button class="barrier-card" type="button" onclick="selectModule('context')"><span class="barrier-icon">↗</span><span class="barrier-copy"><strong>Não entendo para que isso serve</strong><small>Conecte o conteúdo à vida real e ao mundo do trabalho.</small></span><span class="arrow">→</span></button>
@@ -108,9 +107,19 @@
           <article class="research-card"><div class="card-title"><div><span class="eyebrow">Barreiras</span><h2>Mais selecionadas</h2></div></div><div id="barrier-chart" class="bar-chart"></div></article>
           <article class="research-card"><div class="card-title"><div><span class="eyebrow">Mediação</span><h2>Níveis de ajuda</h2></div></div><div id="help-chart" class="bar-chart"></div></article>
         </div>
+
+        <article class="research-card">
+          <div class="card-title">
+            <div><span class="eyebrow">Privacidade e gestão</span><h2>Gerenciar participantes</h2><p>Consulte sessões por código e remova registros inválidos ou dados de um participante quando necessário.</p></div>
+          </div>
+          <div id="participant-list" class="participant-list"></div>
+          <p class="management-note">As exclusões realizadas aqui afetam apenas os dados armazenados neste dispositivo. Na futura versão com banco de dados, esta mesma ação será aplicada ao armazenamento central.</p>
+          <div id="research-status" class="research-status hidden" role="status"></div>
+        </article>
+
         <article class="research-card export-card">
           <div><span class="eyebrow">Dados locais</span><h2>Exportar para análise</h2><p>O CSV contém apenas campos estruturados dos eventos. O Adapt não inclui o texto digitado pelo estudante nesses logs.</p></div>
-          <div class="export-actions"><button class="primary-button" type="button" onclick="exportResearchCsv()">Exportar pesquisa (.csv)</button><button class="secondary-button" type="button" onclick="exportResearchJson()">Pesquisa (.json)</button><button class="secondary-button" type="button" onclick="exportTestJson()">Testes (.json)</button></div>
+          <div class="export-actions"><button class="primary-button" type="button" onclick="exportResearchCsv()">Exportar pesquisa (.csv)</button><button class="secondary-button" type="button" onclick="exportResearchJson()">Pesquisa (.json)</button><button class="secondary-button" type="button" onclick="exportTestJson()">Testes (.json)</button><button class="danger-button" type="button" onclick="requestClearTestLogs()">Apagar todos os testes</button></div>
         </article>
         <div class="research-warning"><strong>Importante:</strong> estes indicadores são descritivos de uso. Eles não devem ser interpretados isoladamente como uma medida direta de autonomia discente.</div>
       </section>
@@ -121,6 +130,25 @@
 
   <div id="idle-overlay" class="modal-overlay hidden" role="dialog" aria-modal="true" aria-labelledby="idle-title">
     <div class="modal-card"><div class="modal-icon">🔒</div><h2 id="idle-title">Esta sessão ainda está sendo usada?</h2><p>Para proteger a privacidade no tablet compartilhado, a sessão será encerrada automaticamente após mais 2 minutos sem interação.</p><button class="primary-button large" type="button" onclick="continueIdleSession()">Sim, continuar sessão</button><button class="text-button" type="button" onclick="finishSession(false)">Encerrar agora</button></div>
+  </div>
+
+  <div id="participant-details-overlay" class="modal-overlay hidden" role="dialog" aria-modal="true" aria-labelledby="participant-details-title">
+    <div class="modal-card modal-wide">
+      <h2 id="participant-details-title">Dados do participante</h2>
+      <p id="participant-details-summary"></p>
+      <div id="participant-session-list" class="session-list"></div>
+      <div class="modal-actions"><button class="secondary-button" type="button" onclick="closeParticipantDetails()">Fechar</button><button id="delete-participant-from-details" class="danger-button" type="button">Excluir todos os dados</button></div>
+    </div>
+  </div>
+
+  <div id="delete-confirm-overlay" class="modal-overlay hidden" role="dialog" aria-modal="true" aria-labelledby="delete-confirm-title">
+    <div class="modal-card modal-wide">
+      <div class="modal-icon">⚠️</div>
+      <h2 id="delete-confirm-title">Confirmar exclusão</h2>
+      <p id="delete-confirm-message"></p>
+      <div class="confirm-field"><label id="delete-confirm-label" for="delete-confirm-input">Digite o código para confirmar</label><input id="delete-confirm-input" type="text" autocomplete="off" oninput="validateDeletionConfirmation()"></div>
+      <div class="modal-actions"><button class="secondary-button" type="button" onclick="cancelDeletion()">Cancelar</button><button id="delete-confirm-button" class="danger-button" type="button" onclick="executeDeletion()" disabled>Excluir definitivamente</button></div>
+    </div>
   </div>
 
   <script src="app.js"></script>
