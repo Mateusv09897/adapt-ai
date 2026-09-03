@@ -1,4 +1,5 @@
 const apiUrl='/api/gemini';
+const TEST_PARTICIPANT_CODE='TESTE-MATEUS';
 
 const modules={
   simplify:{title:'O texto está difícil',symbol:'Aa',description:'Cole somente o trecho que está impedindo você de continuar.',inputId:'simplify-input',buttonId:'simplify-button',logName:'Simplificador'},
@@ -12,15 +13,44 @@ let currentModule=null;
 let selectedFile=null;
 let currentResult='';
 let helpLevel=0;
-let session={id:null,participantCode:null,startedAt:null};
+let session={id:null,participantCode:null,startedAt:null,isTest:false};
 let speechSynthesisRef=window.speechSynthesis;
 let interfaceFontStep=0;
+
+function ensureTestModeBadge(){
+  if(document.getElementById('test-mode-badge'))return;
+  const actions=document.querySelector('.topbar-actions');
+  if(!actions)return;
+  const badge=document.createElement('span');
+  badge.id='test-mode-badge';
+  badge.textContent='🧪 Modo Teste';
+  badge.setAttribute('aria-live','polite');
+  badge.style.display='none';
+  badge.style.alignItems='center';
+  badge.style.gap='6px';
+  badge.style.padding='8px 12px';
+  badge.style.borderRadius='999px';
+  badge.style.background='#fff4df';
+  badge.style.border='1px solid #f3c16f';
+  badge.style.color='#8b5a12';
+  badge.style.fontWeight='800';
+  badge.style.fontSize='.82rem';
+  actions.prepend(badge);
+}
+
+function updateTestModeUI(){
+  ensureTestModeBadge();
+  const badge=document.getElementById('test-mode-badge');
+  if(badge)badge.style.display=session.isTest?'inline-flex':'none';
+  document.body.dataset.testMode=session.isTest?'true':'false';
+}
 
 function showScreen(id){
   document.querySelectorAll('.screen').forEach(s=>s.classList.remove('active'));
   document.getElementById(id).classList.add('active');
   window.scrollTo({top:0,behavior:'smooth'});
   document.getElementById('end-session-button').classList.toggle('hidden',id==='start-screen'||id==='complete-screen');
+  updateTestModeUI();
 }
 
 function startSession(requireCode){
@@ -32,8 +62,9 @@ function startSession(requireCode){
     return;
   }
   input.removeAttribute('aria-invalid');
-  session={id:crypto.randomUUID(),participantCode:code||null,startedAt:new Date().toISOString()};
-  saveEvent('session_started',{with_code:Boolean(code)});
+  const isTest=code===TEST_PARTICIPANT_CODE;
+  session={id:crypto.randomUUID(),participantCode:code||null,startedAt:new Date().toISOString(),isTest};
+  saveEvent('session_started',{with_code:Boolean(code),mode:isTest?'test':'standard'});
   showScreen('barrier-screen');
 }
 
@@ -121,8 +152,9 @@ function finishSession(completed=true){
     saveEvent('session_ended',{completed,duration_seconds:Math.round((Date.now()-new Date(session.startedAt).getTime())/1000)});
   }
   clearWorkingData();
-  session={id:null,participantCode:null,startedAt:null};
+  session={id:null,participantCode:null,startedAt:null,isTest:false};
   document.getElementById('participant-code').value='';
+  updateTestModeUI();
   showScreen('start-screen');
 }
 
@@ -193,16 +225,44 @@ function hideStatus(){document.getElementById('status-message').classList.add('h
 function changeInterfaceFont(direction){interfaceFontStep=Math.max(-2,Math.min(4,interfaceFontStep+direction));document.documentElement.style.fontSize=`${16+interfaceFontStep}px`}
 
 function saveEvent(event,data={}){
-  const logs=JSON.parse(localStorage.getItem('adapt_research_logs')||'[]');
-  logs.push({event,timestamp:new Date().toISOString(),session_id:session.id,participant_code:session.participantCode,...data});
-  localStorage.setItem('adapt_research_logs',JSON.stringify(logs));
+  const storageKey=session.isTest?'adapt_test_logs':'adapt_research_logs';
+  const logs=JSON.parse(localStorage.getItem(storageKey)||'[]');
+  logs.push({
+    event,
+    timestamp:new Date().toISOString(),
+    session_id:session.id,
+    participant_code:session.participantCode,
+    is_test:Boolean(session.isTest),
+    ...data
+  });
+  localStorage.setItem(storageKey,JSON.stringify(logs));
 }
 
-// Atalho de pesquisa: Ctrl+Alt+L exporta os logs locais sem expor controle na interface do aluno.
+function exportLogs(storageKey,filePrefix){
+  const logs=localStorage.getItem(storageKey)||'[]';
+  const blob=new Blob([logs],{type:'application/json'});
+  const url=URL.createObjectURL(blob);
+  const a=document.createElement('a');
+  a.href=url;
+  a.download=`${filePrefix}_${new Date().toISOString().slice(0,10)}.json`;
+  a.click();
+  URL.revokeObjectURL(url);
+}
+
+// Atalhos do pesquisador:
+// Ctrl+Alt+L = exporta apenas logs de pesquisa.
+// Ctrl+Alt+T = exporta apenas logs gerados com TESTE-MATEUS.
 document.addEventListener('keydown',event=>{
   if(event.ctrlKey&&event.altKey&&event.key.toLowerCase()==='l'){
-    const logs=localStorage.getItem('adapt_research_logs')||'[]';
-    const blob=new Blob([logs],{type:'application/json'});const url=URL.createObjectURL(blob);const a=document.createElement('a');a.href=url;a.download=`adapt_logs_${new Date().toISOString().slice(0,10)}.json`;a.click();URL.revokeObjectURL(url);
+    exportLogs('adapt_research_logs','adapt_logs_pesquisa');
+  }
+  if(event.ctrlKey&&event.altKey&&event.key.toLowerCase()==='t'){
+    exportLogs('adapt_test_logs','adapt_logs_teste');
   }
   if(event.key==='Escape')stopText();
+});
+
+document.addEventListener('DOMContentLoaded',()=>{
+  ensureTestModeBadge();
+  updateTestModeUI();
 });
