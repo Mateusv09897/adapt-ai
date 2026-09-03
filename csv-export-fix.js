@@ -25,4 +25,12 @@
     const blob=new Blob([csv],{type:'text/csv;charset=utf-8'});
     downloadBlob(blob,`adapt_pesquisa_${new Date().toISOString().slice(0,10)}.csv`);
   };
+
+  // A camada de armazenamento central é carregada depois do app e desta correção,
+  // para poder preservar o funcionamento local e substituir apenas sincronização,
+  // exportação e exclusão quando o banco estiver configurado.
+  const centralScript=document.createElement('script');
+  centralScript.src='central-storage.js';
+  centralScript.defer=true;
+  document.body.appendChild(centralScript);
 })();
