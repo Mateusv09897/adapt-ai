@@ -1,5 +1,9 @@
 const apiUrl='/api/gemini';
 const TEST_PARTICIPANT_CODE='TESTE-MATEUS';
+const RESEARCH_STORAGE_KEY='adapt_research_logs';
+const TEST_STORAGE_KEY='adapt_test_logs';
+const IDLE_WARNING_MS=8*60*1000;
+const IDLE_END_MS=2*60*1000;
 
 const modules={
   simplify:{title:'O texto está difícil',symbol:'Aa',description:'Cole somente o trecho que está impedindo você de continuar.',inputId:'simplify-input',buttonId:'simplify-button',logName:'Simplificador'},
@@ -16,6 +20,9 @@ let helpLevel=0;
 let session={id:null,participantCode:null,startedAt:null,isTest:false};
 let speechSynthesisRef=window.speechSynthesis;
 let interfaceFontStep=0;
+let screenBeforeResearch='barrier-screen';
+let idleWarningTimer=null;
+let idleEndTimer=null;
 
 function ensureTestModeBadge(){
   if(document.getElementById('test-mode-badge'))return;
@@ -24,43 +31,35 @@ function ensureTestModeBadge(){
   const badge=document.createElement('span');
   badge.id='test-mode-badge';
   badge.textContent='🧪 Modo Teste';
+  badge.className='test-mode-badge';
   badge.setAttribute('aria-live','polite');
-  badge.style.display='none';
-  badge.style.alignItems='center';
-  badge.style.gap='6px';
-  badge.style.padding='8px 12px';
-  badge.style.borderRadius='999px';
-  badge.style.background='#fff4df';
-  badge.style.border='1px solid #f3c16f';
-  badge.style.color='#8b5a12';
-  badge.style.fontWeight='800';
-  badge.style.fontSize='.82rem';
   actions.prepend(badge);
 }
 
 function updateTestModeUI(){
   ensureTestModeBadge();
   const badge=document.getElementById('test-mode-badge');
-  if(badge)badge.style.display=session.isTest?'inline-flex':'none';
+  const dashboardButton=document.getElementById('research-dashboard-button');
+  if(badge)badge.classList.toggle('hidden',!session.isTest);
+  if(dashboardButton)dashboardButton.classList.toggle('hidden',!session.isTest);
   document.body.dataset.testMode=session.isTest?'true':'false';
 }
 
 function showScreen(id){
   document.querySelectorAll('.screen').forEach(s=>s.classList.remove('active'));
-  document.getElementById(id).classList.add('active');
+  const screen=document.getElementById(id);
+  if(screen)screen.classList.add('active');
   window.scrollTo({top:0,behavior:'smooth'});
-  document.getElementById('end-session-button').classList.toggle('hidden',id==='start-screen'||id==='complete-screen');
+  const hideEnd=['start-screen','complete-screen','research-screen'].includes(id);
+  document.getElementById('end-session-button').classList.toggle('hidden',hideEnd);
   updateTestModeUI();
+  if(id==='research-screen')clearIdleTimers(); else if(session.id)scheduleIdleProtection();
 }
 
 function startSession(requireCode){
   const input=document.getElementById('participant-code');
   const code=input.value.trim().toUpperCase();
-  if(requireCode&&!code){
-    input.focus();
-    input.setAttribute('aria-invalid','true');
-    return;
-  }
+  if(requireCode&&!code){input.focus();input.setAttribute('aria-invalid','true');return;}
   input.removeAttribute('aria-invalid');
   const isTest=code===TEST_PARTICIPANT_CODE;
   session={id:crypto.randomUUID(),participantCode:code||null,startedAt:new Date().toISOString(),isTest};
@@ -69,9 +68,7 @@ function startSession(requireCode){
 }
 
 function selectModule(name){
-  currentModule=name;
-  helpLevel=0;
-  currentResult='';
+  currentModule=name;helpLevel=0;currentResult='';
   const cfg=modules[name];
   document.getElementById('module-title').textContent=cfg.title;
   document.getElementById('module-description').textContent=cfg.description;
@@ -86,8 +83,7 @@ function selectModule(name){
 
 function goToBarrierScreen(){
   if(!session.id){showScreen('start-screen');return;}
-  stopText();
-  showScreen('barrier-screen');
+  stopText();showScreen('barrier-screen');
 }
 
 function buildPrompt(type,input,moreHelp=false){
@@ -101,168 +97,191 @@ function buildPrompt(type,input,moreHelp=false){
 
 async function requestMediation(type,moreHelp=false){
   hideStatus();
-  let input='';
-  let parts=[];
+  let input='';let parts=[];
   if(type==='image'){
     if(!selectedFile){showStatus('Selecione uma imagem antes de continuar.','error');return;}
     const imagePart=await fileToGenerativePart(selectedFile);
-    parts=[{text:buildPrompt(type,'',moreHelp)},imagePart];
-    input='Imagem enviada';
+    parts=[{text:buildPrompt(type,'',moreHelp)},imagePart];input='Imagem enviada';
   }else{
-    const cfg=modules[type];
-    input=document.getElementById(cfg.inputId).value.trim();
+    const cfg=modules[type];input=document.getElementById(cfg.inputId).value.trim();
     if(!input){showStatus('Preencha o campo para que o Adapt possa ajudar.','error');return;}
     parts=[{text:buildPrompt(type,input,moreHelp)}];
   }
-
-  if(moreHelp)helpLevel+=1; else helpLevel=1;
+  if(moreHelp)helpLevel+=1;else helpLevel=1;
   setLoading(true);
   try{
-    const text=await callGemini(parts);
-    currentResult=text;
+    const text=await callGemini(parts);currentResult=text;
     document.getElementById('result-output').innerHTML=formatAIResponse(text);
     document.getElementById('result-card').classList.remove('hidden');
     document.getElementById('more-help-button').textContent=helpLevel>=2?'Ainda preciso de outra pista':'Ainda preciso de uma pista';
-    saveEvent(moreHelp?'additional_hint_requested':'mediation_generated',{
-      module:modules[type].logName,
-      help_level:helpLevel,
-      input_length:type==='image'?null:input.length
-    });
-    if(window.MathJax) MathJax.typesetPromise([document.getElementById('result-output')]);
+    saveEvent(moreHelp?'additional_hint_requested':'mediation_generated',{module:modules[type].logName,help_level:helpLevel,input_length:type==='image'?null:input.length});
+    if(window.MathJax)MathJax.typesetPromise([document.getElementById('result-output')]);
     document.getElementById('result-card').scrollIntoView({behavior:'smooth',block:'start'});
-  }catch(error){
-    console.error(error);
-    showStatus('Não foi possível gerar a mediação agora. Tente novamente.','error');
-  }finally{setLoading(false);}
+  }catch(error){console.error(error);showStatus('Não foi possível gerar a mediação agora. Tente novamente.','error');}
+  finally{setLoading(false);}
 }
 
-function requestMoreHelp(){
-  if(!currentModule||currentModule==='voice')return;
-  requestMediation(currentModule,true);
-}
+function requestMoreHelp(){if(currentModule&&currentModule!=='voice')requestMediation(currentModule,true);}
 
 function markReturnToActivity(){
   saveEvent('return_to_activity',{module:modules[currentModule]?.logName||currentModule,help_level:helpLevel});
-  stopText();
-  showScreen('complete-screen');
+  stopText();showScreen('complete-screen');
 }
 
-function finishSession(completed=true){
+function finishSession(completed=true,reason='manual'){
   if(session.id){
-    saveEvent('session_ended',{completed,duration_seconds:Math.round((Date.now()-new Date(session.startedAt).getTime())/1000)});
+    const started=new Date(session.startedAt).getTime();
+    saveEvent('session_ended',{completed,reason,duration_seconds:Number.isFinite(started)?Math.max(0,Math.round((Date.now()-started)/1000)):null});
   }
-  clearWorkingData();
+  clearIdleTimers();hideIdleOverlay();clearWorkingData();
   session={id:null,participantCode:null,startedAt:null,isTest:false};
   document.getElementById('participant-code').value='';
-  updateTestModeUI();
-  showScreen('start-screen');
+  updateTestModeUI();showScreen('start-screen');
 }
 
-function prepareNextStudent(){finishSession(true);}
+function prepareNextStudent(){finishSession(true,'returned_to_activity');}
 
 function clearWorkingData(){
   document.querySelectorAll('textarea').forEach(t=>t.value='');
-  document.getElementById('result-output').innerHTML='';
-  document.getElementById('result-card').classList.add('hidden');
+  document.getElementById('result-output').innerHTML='';document.getElementById('result-card').classList.add('hidden');
   selectedFile=null;currentResult='';currentModule=null;helpLevel=0;
-  const preview=document.getElementById('image-preview');
-  preview.src='';preview.classList.add('hidden');
-  document.getElementById('image-placeholder').classList.remove('hidden');
-  document.getElementById('image-input').value='';
+  const preview=document.getElementById('image-preview');preview.src='';preview.classList.add('hidden');
+  document.getElementById('image-placeholder').classList.remove('hidden');document.getElementById('image-input').value='';
   stopText();hideStatus();
 }
 
 function handleFileSelect(event){
   selectedFile=event.target.files?.[0]||null;
-  const preview=document.getElementById('image-preview');
-  const placeholder=document.getElementById('image-placeholder');
+  const preview=document.getElementById('image-preview');const placeholder=document.getElementById('image-placeholder');
   if(!selectedFile){preview.classList.add('hidden');placeholder.classList.remove('hidden');return;}
-  const reader=new FileReader();
-  reader.onload=e=>{preview.src=e.target.result;preview.classList.remove('hidden');placeholder.classList.add('hidden');};
-  reader.readAsDataURL(selectedFile);
+  const reader=new FileReader();reader.onload=e=>{preview.src=e.target.result;preview.classList.remove('hidden');placeholder.classList.add('hidden');};reader.readAsDataURL(selectedFile);
 }
 
-function fileToGenerativePart(file){
-  return new Promise((resolve,reject)=>{
-    const reader=new FileReader();
-    reader.onloadend=()=>resolve({inlineData:{mimeType:file.type,data:reader.result.split(',')[1]}});
-    reader.onerror=reject;
-    reader.readAsDataURL(file);
-  });
-}
+function fileToGenerativePart(file){return new Promise((resolve,reject)=>{const reader=new FileReader();reader.onloadend=()=>resolve({inlineData:{mimeType:file.type,data:reader.result.split(',')[1]}});reader.onerror=reject;reader.readAsDataURL(file);});}
 
 async function callGemini(parts){
   const response=await fetch(apiUrl,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({contents:[{role:'user',parts}]})});
-  const data=await response.json();
-  if(!response.ok)throw new Error(data.error||'Erro na API');
+  const data=await response.json();if(!response.ok)throw new Error(data.error||'Erro na API');
   return data.text||data.result||data.candidates?.[0]?.content?.parts?.[0]?.text||'';
 }
 
 function formatAIResponse(text){
   const safe=text.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
   const styled=safe.replace(/\*\*(.*?)\*\*/g,'<strong>$1</strong>').replace(/(?<!\*)\*(?!\s)(.*?)(?<!\s)\*(?!\*)/g,'<em>$1</em>');
-  const lines=styled.trim().split('\n');let html='';let ul=false;let ol=false;
+  const lines=styled.trim().split('\n');let html='',ul=false,ol=false;
   const closeLists=()=>{if(ul){html+='</ul>';ul=false}if(ol){html+='</ol>';ol=false}};
   for(const line of lines){const t=line.trim();if(!t)continue;if(t.startsWith('#')){closeLists();html+=`<h3>${t.replace(/#+\s*/,'')}</h3>`;continue}if(/^[-*]\s/.test(t)){if(!ul){if(ol){html+='</ol>';ol=false}html+='<ul>';ul=true}html+=`<li>${t.replace(/^[-*]\s/,'')}</li>`;continue}if(/^\d+\.\s/.test(t)){if(!ol){if(ul){html+='</ul>';ul=false}html+='<ol>';ol=true}html+=`<li>${t.replace(/^\d+\.\s/,'')}</li>`;continue}closeLists();html+=`<p>${t}</p>`}closeLists();return html;
 }
 
-function playVoiceText(){
-  const text=document.getElementById('voice-input').value.trim();
-  if(!text){showStatus('Cole ou digite um texto para ouvir.','error');return;}
-  saveEvent('voice_started',{module:'LeitorVoz',input_length:text.length});
-  speak(text);
-}
+function playVoiceText(){const text=document.getElementById('voice-input').value.trim();if(!text){showStatus('Cole ou digite um texto para ouvir.','error');return;}saveEvent('voice_started',{module:'LeitorVoz',input_length:text.length});speak(text);}
 function narrateResult(){if(currentResult){saveEvent('mediation_narrated',{module:modules[currentModule]?.logName||currentModule});speak(currentResult)}}
 function speak(text){stopText();const utterance=new SpeechSynthesisUtterance(text);utterance.lang='pt-BR';utterance.rate=1;speechSynthesisRef.speak(utterance)}
 function stopText(){if(speechSynthesisRef)speechSynthesisRef.cancel()}
-
-function setLoading(isLoading){
-  const id=modules[currentModule]?.buttonId;if(!id)return;
-  const button=document.getElementById(id);button.disabled=isLoading;button.classList.toggle('loading',isLoading);
-}
+function setLoading(isLoading){const id=modules[currentModule]?.buttonId;if(!id)return;const button=document.getElementById(id);button.disabled=isLoading;button.classList.toggle('loading',isLoading);}
 function showStatus(message,type='info'){const el=document.getElementById('status-message');el.textContent=message;el.className=`status-message ${type}`;el.classList.remove('hidden')}
 function hideStatus(){document.getElementById('status-message').classList.add('hidden')}
 function changeInterfaceFont(direction){interfaceFontStep=Math.max(-2,Math.min(4,interfaceFontStep+direction));document.documentElement.style.fontSize=`${16+interfaceFontStep}px`}
 
+function readLogs(storageKey){
+  try{const parsed=JSON.parse(localStorage.getItem(storageKey)||'[]');return Array.isArray(parsed)?parsed:[];}catch{return[];}
+}
+
 function saveEvent(event,data={}){
-  const storageKey=session.isTest?'adapt_test_logs':'adapt_research_logs';
-  const logs=JSON.parse(localStorage.getItem(storageKey)||'[]');
-  logs.push({
-    event,
-    timestamp:new Date().toISOString(),
-    session_id:session.id,
-    participant_code:session.participantCode,
-    is_test:Boolean(session.isTest),
-    ...data
-  });
+  if(!session.id)return;
+  const storageKey=session.isTest?TEST_STORAGE_KEY:RESEARCH_STORAGE_KEY;
+  const logs=readLogs(storageKey);
+  logs.push({event,timestamp:new Date().toISOString(),session_id:session.id,participant_code:session.participantCode,is_test:Boolean(session.isTest),...data});
   localStorage.setItem(storageKey,JSON.stringify(logs));
 }
 
-function exportLogs(storageKey,filePrefix){
-  const logs=localStorage.getItem(storageKey)||'[]';
-  const blob=new Blob([logs],{type:'application/json'});
-  const url=URL.createObjectURL(blob);
-  const a=document.createElement('a');
-  a.href=url;
-  a.download=`${filePrefix}_${new Date().toISOString().slice(0,10)}.json`;
-  a.click();
-  URL.revokeObjectURL(url);
+function exportJson(storageKey,filePrefix){
+  const blob=new Blob([JSON.stringify(readLogs(storageKey),null,2)],{type:'application/json;charset=utf-8'});
+  downloadBlob(blob,`${filePrefix}_${new Date().toISOString().slice(0,10)}.json`);
+}
+function exportResearchJson(){exportJson(RESEARCH_STORAGE_KEY,'adapt_pesquisa')}
+function exportTestJson(){exportJson(TEST_STORAGE_KEY,'adapt_testes')}
+
+function exportResearchCsv(){
+  const logs=readLogs(RESEARCH_STORAGE_KEY);
+  const columns=['event','timestamp','session_id','participant_code','is_test','module','help_level','input_length','with_code','mode','completed','reason','duration_seconds'];
+  const rows=[columns.join(',')];
+  for(const item of logs)rows.push(columns.map(key=>csvCell(item[key])).join(','));
+  const blob=new Blob(['\ufeff'+rows.join('\n')],{type:'text/csv;charset=utf-8'});
+  downloadBlob(blob,`adapt_pesquisa_${new Date().toISOString().slice(0,10)}.csv`);
+}
+function csvCell(value){if(value===undefined||value===null)return'';const str=String(value);return /[",\n]/.test(str)?`"${str.replace(/"/g,'""')}"`:str;}
+function downloadBlob(blob,fileName){const url=URL.createObjectURL(blob);const a=document.createElement('a');a.href=url;a.download=fileName;document.body.appendChild(a);a.click();a.remove();setTimeout(()=>URL.revokeObjectURL(url),1000);}
+
+function openResearchDashboard(){
+  if(!session.isTest)return;
+  const active=document.querySelector('.screen.active');
+  if(active&&active.id!=='research-screen')screenBeforeResearch=active.id;
+  renderResearchDashboard();showScreen('research-screen');
+}
+function closeResearchDashboard(){showScreen(screenBeforeResearch||'barrier-screen')}
+
+function renderResearchDashboard(){
+  const logs=readLogs(RESEARCH_STORAGE_KEY).filter(item=>!item.is_test);
+  const sessionsStarted=logs.filter(i=>i.event==='session_started');
+  const sessionIds=new Set(sessionsStarted.map(i=>i.session_id).filter(Boolean));
+  const participants=new Set(sessionsStarted.map(i=>i.participant_code).filter(Boolean));
+  const mediations=logs.filter(i=>i.event==='mediation_generated');
+  const mediatedSessions=new Set(mediations.map(i=>i.session_id).filter(Boolean));
+  const returnedSessions=new Set(logs.filter(i=>i.event==='return_to_activity').map(i=>i.session_id).filter(Boolean));
+  const returnCount=[...mediatedSessions].filter(id=>returnedSessions.has(id)).length;
+  const returnRate=mediatedSessions.size?Math.round(returnCount/mediatedSessions.size*100):0;
+  const maxHelpBySession={};
+  logs.filter(i=>['mediation_generated','additional_hint_requested'].includes(i.event)&&i.session_id).forEach(i=>{const level=Number(i.help_level)||0;maxHelpBySession[i.session_id]=Math.max(maxHelpBySession[i.session_id]||0,level);});
+  const helpValues=Object.values(maxHelpBySession);
+  const avgHelp=helpValues.length?helpValues.reduce((a,b)=>a+b,0)/helpValues.length:0;
+  const durations=logs.filter(i=>i.event==='session_ended'&&Number.isFinite(Number(i.duration_seconds))).map(i=>Number(i.duration_seconds));
+  const avgDuration=durations.length?durations.reduce((a,b)=>a+b,0)/durations.length:0;
+  setText('metric-participants',participants.size);setText('metric-sessions',sessionIds.size);setText('metric-mediations',mediations.length);setText('metric-return-rate',`${returnRate}%`);setText('metric-help-level',avgHelp?avgHelp.toFixed(1):'0');setText('metric-duration',formatDuration(avgDuration));
+
+  const barriers={};logs.filter(i=>i.event==='barrier_selected').forEach(i=>{const name=i.module||'Outro';barriers[name]=(barriers[name]||0)+1;});
+  renderBarChart('barrier-chart',barriers,'Nenhuma barreira registrada ainda.');
+  const helpDist={'1 mediação':0,'2 pistas':0,'3+ pistas':0};
+  helpValues.forEach(level=>{if(level<=1)helpDist['1 mediação']++;else if(level===2)helpDist['2 pistas']++;else helpDist['3+ pistas']++;});
+  renderBarChart('help-chart',helpDist,'Ainda não há sessões com mediação.');
 }
 
-// Atalhos do pesquisador:
-// Ctrl+Alt+L = exporta apenas logs de pesquisa.
-// Ctrl+Alt+T = exporta apenas logs gerados com TESTE-MATEUS.
+function setText(id,value){const el=document.getElementById(id);if(el)el.textContent=value;}
+function formatDuration(seconds){const total=Math.round(Number(seconds)||0);if(total<60)return`${total}s`;const min=Math.floor(total/60),sec=total%60;return`${min}min ${sec}s`;}
+function renderBarChart(id,data,emptyText){
+  const el=document.getElementById(id);if(!el)return;const entries=Object.entries(data).filter(([,v])=>v>0).sort((a,b)=>b[1]-a[1]);
+  if(!entries.length){el.innerHTML=`<p class="empty-state">${emptyText}</p>`;return;}
+  const max=Math.max(...entries.map(([,v])=>v));
+  el.innerHTML=entries.map(([label,value])=>`<div class="bar-row"><div class="bar-meta"><span>${escapeHtml(label)}</span><strong>${value}</strong></div><div class="bar-track"><span style="width:${Math.max(5,value/max*100)}%"></span></div></div>`).join('');
+}
+function escapeHtml(value){return String(value).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;').replace(/'/g,'&#039;');}
+
+function scheduleIdleProtection(){
+  clearIdleTimers();
+  if(!session.id||document.getElementById('research-screen').classList.contains('active'))return;
+  idleWarningTimer=setTimeout(showIdleWarning,IDLE_WARNING_MS);
+}
+function clearIdleTimers(){if(idleWarningTimer)clearTimeout(idleWarningTimer);if(idleEndTimer)clearTimeout(idleEndTimer);idleWarningTimer=null;idleEndTimer=null;}
+function showIdleWarning(){
+  if(!session.id)return;saveEvent('inactivity_warning');
+  document.getElementById('idle-overlay').classList.remove('hidden');
+  idleEndTimer=setTimeout(()=>finishSession(false,'inactivity_timeout'),IDLE_END_MS);
+}
+function hideIdleOverlay(){document.getElementById('idle-overlay').classList.add('hidden')}
+function continueIdleSession(){hideIdleOverlay();saveEvent('inactivity_session_continued');scheduleIdleProtection();}
+function registerActivity(){
+  if(!session.id)return;
+  const overlay=document.getElementById('idle-overlay');
+  if(overlay&&!overlay.classList.contains('hidden'))return;
+  scheduleIdleProtection();
+}
+
+// Atalhos do pesquisador: Ctrl+Alt+P abre o painel em Modo Teste; L exporta pesquisa; T exporta testes.
 document.addEventListener('keydown',event=>{
-  if(event.ctrlKey&&event.altKey&&event.key.toLowerCase()==='l'){
-    exportLogs('adapt_research_logs','adapt_logs_pesquisa');
-  }
-  if(event.ctrlKey&&event.altKey&&event.key.toLowerCase()==='t'){
-    exportLogs('adapt_test_logs','adapt_logs_teste');
-  }
+  if(event.ctrlKey&&event.altKey&&event.key.toLowerCase()==='p'){event.preventDefault();openResearchDashboard();}
+  if(event.ctrlKey&&event.altKey&&event.key.toLowerCase()==='l'){event.preventDefault();exportResearchJson();}
+  if(event.ctrlKey&&event.altKey&&event.key.toLowerCase()==='t'){event.preventDefault();exportTestJson();}
   if(event.key==='Escape')stopText();
 });
+['pointerdown','touchstart','input'].forEach(type=>document.addEventListener(type,registerActivity,{passive:true}));
 
-document.addEventListener('DOMContentLoaded',()=>{
-  ensureTestModeBadge();
-  updateTestModeUI();
-});
+document.addEventListener('DOMContentLoaded',()=>{ensureTestModeBadge();updateTestModeUI();});
