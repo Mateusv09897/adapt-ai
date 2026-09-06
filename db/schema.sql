@@ -21,5 +21,14 @@ CREATE INDEX IF NOT EXISTS idx_adapt_events_session ON adapt_research_events (se
 CREATE INDEX IF NOT EXISTS idx_adapt_events_occurred ON adapt_research_events (occurred_at);
 CREATE INDEX IF NOT EXISTS idx_adapt_events_test ON adapt_research_events (is_test);
 
+CREATE TABLE IF NOT EXISTS adapt_admin_auth_attempts (
+  client_hash VARCHAR(64) PRIMARY KEY,
+  failures SMALLINT NOT NULL DEFAULT 0,
+  window_started_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  blocked_until TIMESTAMPTZ
+);
+
 -- O Adapt não persiste o texto digitado pelo estudante nesta tabela.
 -- Somente eventos estruturados e pseudonimizados são armazenados.
+-- A tabela de autenticação guarda somente hash HMAC do cliente e contadores de tentativa;
+-- IP, user-agent e senha administrativa não são armazenados em texto legível.
