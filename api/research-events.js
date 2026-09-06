@@ -27,12 +27,24 @@ export default async function handler(req, res) {
   if (req.method !== 'POST') return res.status(405).json({ error: 'Método não permitido. Use POST.' });
   if (!isDatabaseConfigured()) return res.status(503).json({ configured: false, error: 'Armazenamento central ainda não configurado.' });
 
+  let payload;
   try {
-    const payload = verifySessionToken(bearer(req));
-    const body = typeof req.body === 'string' ? JSON.parse(req.body) : (req.body || {});
-    const events = Array.isArray(body.events) ? body.events.slice(0, 100) : [];
-    if (!events.length) return res.status(400).json({ error: 'Nenhum evento recebido.' });
+    payload = verifySessionToken(bearer(req));
+  } catch (error) {
+    return res.status(401).json({ error: 'Sessão de pesquisa inválida ou expirada.' });
+  }
 
+  let body;
+  try {
+    body = typeof req.body === 'string' ? JSON.parse(req.body) : (req.body || {});
+  } catch {
+    return res.status(400).json({ error: 'Corpo da requisição inválido.' });
+  }
+
+  const events = Array.isArray(body.events) ? body.events.slice(0, 100) : [];
+  if (!events.length) return res.status(400).json({ error: 'Nenhum evento recebido.' });
+
+  try {
     const sql = getSql();
     await ensureResearchSchema(sql);
 
@@ -64,6 +76,6 @@ export default async function handler(req, res) {
     return res.status(200).json({ configured: true, received: events.length, saved });
   } catch (error) {
     console.error('Erro ao salvar eventos da pesquisa:', error);
-    return res.status(401).json({ error: error.message || 'Não foi possível validar a sessão de pesquisa.' });
+    return res.status(500).json({ error: 'Falha interna ao salvar os eventos da pesquisa.' });
   }
 }
