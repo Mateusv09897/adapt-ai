@@ -26,11 +26,14 @@
     downloadBlob(blob,`adapt_pesquisa_${new Date().toISOString().slice(0,10)}.csv`);
   };
 
-  // A camada de armazenamento central é carregada depois do app e desta correção,
-  // para poder preservar o funcionamento local e substituir apenas sincronização,
-  // exportação e exclusão quando o banco estiver configurado.
-  const centralScript=document.createElement('script');
-  centralScript.src='central-storage.js';
-  centralScript.defer=true;
-  document.body.appendChild(centralScript);
+  // central-storage.js já é carregado estaticamente no index.html. Carregá-lo
+  // novamente aqui criava wrappers e timers duplicados. As correções metodológicas
+  // entram somente após o DOM estar pronto, quando a camada central já foi executada.
+  document.addEventListener('DOMContentLoaded',()=>{
+    if(document.querySelector('script[data-adapt-methodology="true"]'))return;
+    const script=document.createElement('script');
+    script.src='research-methodology-fix.js';
+    script.dataset.adaptMethodology='true';
+    document.body.appendChild(script);
+  });
 })();
