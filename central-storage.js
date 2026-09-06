@@ -8,6 +8,8 @@
   const CENTRAL_ADMIN='/api/research-admin';
   const ADMIN_TOKEN_KEY='adapt_research_admin_token';
   const LEGACY_ADMIN_KEY='adapt_research_admin_key';
+  const PARTICIPANT_PAGE_SIZE=25;
+  const SESSION_PAGE_SIZE=10;
 
   // Versões anteriores mantinham a senha administrativa no sessionStorage.
   // Remove qualquer resíduo assim que a nova camada é carregada.
@@ -15,6 +17,7 @@
 
   const originalStartSession=startSession;
   const originalOpenResearchDashboard=openResearchDashboard;
+  const originalOpenParticipantDetails=openParticipantDetails;
   const originalExecuteDeletion=executeDeletion;
   const localExportResearchCsv=window.exportResearchCsv;
   const localExportResearchJson=window.exportResearchJson;
@@ -23,6 +26,9 @@
   let centralConfigured=false;
   let syncing=false;
   let syncTimer=null;
+  let participantPage=1;
+  let activeParticipantCode=null;
+  let participantSessionPage=1;
 
   function ensureStorageStatus(){
     if(document.getElementById('central-storage-status'))return;
@@ -243,49 +249,146 @@
     return Array.isArray(data.events)?data.events:[];
   }
 
-  function renderDashboardFromLogs(logs){
-    const researchLogs=logs.filter(item=>!item.is_test);
-    const sessionsStarted=researchLogs.filter(i=>i.event==='session_started');
-    const sessionIds=new Set(sessionsStarted.map(i=>i.session_id).filter(Boolean));
-    const participants=new Set(sessionsStarted.map(i=>i.participant_code).filter(Boolean));
-    const mediations=researchLogs.filter(i=>i.event==='mediation_generated');
-    const mediatedSessions=new Set(mediations.map(i=>i.session_id).filter(Boolean));
-    const returnedSessions=new Set(researchLogs.filter(i=>i.event==='return_to_activity').map(i=>i.session_id).filter(Boolean));
-    const returnCount=[...mediatedSessions].filter(id=>returnedSessions.has(id)).length;
-    const returnRate=mediatedSessions.size?Math.round(returnCount/mediatedSessions.size*100):0;
-    const maxHelpBySession={};
-    researchLogs.filter(i=>['mediation_generated','additional_hint_requested'].includes(i.event)&&i.session_id).forEach(i=>{
-      const level=Number(i.help_level)||0;
-      maxHelpBySession[i.session_id]=Math.max(maxHelpBySession[i.session_id]||0,level);
-    });
-    const helpValues=Object.values(maxHelpBySession);
-    const avgHelp=helpValues.length?helpValues.reduce((a,b)=>a+b,0)/helpValues.length:0;
-    const durations=researchLogs.filter(i=>i.event==='session_ended'&&Number.isFinite(Number(i.duration_seconds))).map(i=>Number(i.duration_seconds));
-    const avgDuration=durations.length?durations.reduce((a,b)=>a+b,0)/durations.length:0;
-
-    setText('metric-participants',participants.size);
-    setText('metric-sessions',sessionIds.size);
-    setText('metric-mediations',mediations.length);
-    setText('metric-return-rate',`${returnRate}%`);
-    setText('metric-help-level',avgHelp?avgHelp.toFixed(1):'0');
-    setText('metric-duration',formatDuration(avgDuration));
+  function renderDashboardSummary(data){
+    const metrics=data?.metrics||{};
+    setText('metric-participants',Number(metrics.participants)||0);
+    setText('metric-sessions',Number(metrics.sessions)||0);
+    setText('metric-mediations',Number(metrics.mediations)||0);
+    setText('metric-return-rate',`${Number(metrics.return_rate)||0}%`);
+    setText('metric-help-level',Number(metrics.avg_help)?Number(metrics.avg_help).toFixed(1):'0');
+    setText('metric-duration',formatDuration(Number(metrics.avg_duration)||0));
 
     const barriers={};
-    researchLogs.filter(i=>i.event==='barrier_selected').forEach(i=>{const name=i.module||'Outro';barriers[name]=(barriers[name]||0)+1;});
+    for(const item of data?.barriers||[])barriers[item.module||'Outro']=Number(item.count)||0;
     renderBarChart('barrier-chart',barriers,'Nenhuma barreira registrada ainda.');
-    const helpDist={'1 mediação':0,'2 pistas':0,'3+ pistas':0};
-    helpValues.forEach(level=>{if(level<=1)helpDist['1 mediação']++;else if(level===2)helpDist['2 pistas']++;else helpDist['3+ pistas']++;});
-    renderBarChart('help-chart',helpDist,'Ainda não há sessões com mediação.');
-    renderParticipantManagement(researchLogs);
+
+    const distribution=data?.help_distribution||{};
+    renderBarChart('help-chart',{
+      '1 mediação':Number(distribution.one_mediation)||0,
+      '2 pistas':Number(distribution.two_hints)||0,
+      '3+ pistas':Number(distribution.three_plus_hints)||0
+    },'Ainda não há sessões com mediação.');
   }
 
-  async function refreshCentralDashboard(){
+  function paginationMarkup(id,pagination,loaderName){
+    if(!pagination)return'';
+    const page=Number(pagination.page)||1;
+    const pages=Number(pagination.pages)||1;
+    const total=Number(pagination.total)||0;
+    return `<div id="${id}" class="participant-actions" style="justify-content:center;align-items:center;margin-top:14px"><button class="secondary-button" type="button" onclick="${loaderName}(${Math.max(1,page-1)})" ${pagination.has_previous?'':'disabled'}>← Anterior</button><span style="font-size:.9rem;color:#6b7b8e;font-weight:700">Página ${page} de ${pages} · ${total} total</span><button class="secondary-button" type="button" onclick="${loaderName}(${page+1})" ${pagination.has_next?'':'disabled'}>Próxima →</button></div>`;
+  }
+
+  function renderCentralParticipantPage(data){
+    const list=document.getElementById('participant-list');
+    if(!list)return;
+    const participants=Array.isArray(data?.participants)?data.participants:[];
+    const pagination=data?.pagination||{page:1,pages:1,total:participants.length};
+
+    if(!participants.length){
+      list.innerHTML='<p class="empty-state">Nenhum participante real foi registrado no banco central.</p>'+paginationMarkup('participant-pagination',pagination,'loadResearchParticipantPage');
+      return;
+    }
+
+    list.innerHTML=participants.map(p=>`<div class="participant-row"><div class="participant-main"><strong>${escapeHtml(p.participant_code)}</strong><span>${Number(p.sessions)||0} sessão(ões) · ${Number(p.events)||0} evento(s) · última atividade: ${escapeHtml(formatDateTime(p.last_activity))}</span></div><div class="participant-actions"><button class="secondary-button" type="button" data-code="${escapeHtml(p.participant_code)}" onclick="openParticipantDetails(this.dataset.code)">Ver dados</button><button class="danger-button" type="button" data-code="${escapeHtml(p.participant_code)}" onclick="requestParticipantDeletion(this.dataset.code)">Excluir dados</button></div></div>`).join('')+paginationMarkup('participant-pagination',pagination,'loadResearchParticipantPage');
+  }
+
+  async function loadParticipantPage(page=1){
+    if(!centralConfigured)return;
+    participantPage=Math.max(1,Number(page)||1);
+    const data=await adminRequest('list-participants',{page:participantPage,limit:PARTICIPANT_PAGE_SIZE});
+    if(data?.pagination&&participantPage>Number(data.pagination.pages||1)){
+      participantPage=Math.max(1,Number(data.pagination.pages)||1);
+      return loadParticipantPage(participantPage);
+    }
+    renderCentralParticipantPage(data);
+  }
+  window.loadResearchParticipantPage=async function(page){
+    try{
+      setStorageStatus('Carregando participantes…','syncing');
+      await loadParticipantPage(page);
+      setStorageStatus('Painel paginado usando dados do banco central','success');
+    }catch(error){
+      showResearchStatus(error.message,'error');
+      setStorageStatus('Falha ao carregar participantes do banco central','warning');
+    }
+  };
+
+  function renderParticipantSessions(data){
+    const code=data?.participant_code||activeParticipantCode||'';
+    const sessions=Array.isArray(data?.sessions)?data.sessions:[];
+    const pagination=data?.pagination||{page:1,pages:1,total:sessions.length};
+    setText('participant-details-title',`Participante ${code}`);
+    setText('participant-details-summary',`${Number(pagination.total)||0} sessão(ões) e ${Number(data?.total_events)||0} evento(s) no banco central.`);
+
+    const container=document.getElementById('participant-session-list');
+    if(!container)return;
+    if(!sessions.length){
+      container.innerHTML='<p class="empty-state">Nenhuma sessão encontrada para este código.</p>'+paginationMarkup('participant-session-pagination',pagination,'loadResearchSessionPage');
+    }else{
+      container.innerHTML=sessions.map(item=>{
+        const modules=Array.isArray(item.modules)&&item.modules.length?item.modules.join(', '):'sem módulo';
+        const meta=[
+          formatDateTime(item.started_at),
+          `${Number(item.event_count)||0} eventos`,
+          modules,
+          Number(item.max_help_level)?`ajuda nível ${Number(item.max_help_level)}`:'sem mediação',
+          item.returned_to_activity?'retornou à atividade':'sem retorno registrado',
+          item.duration_seconds!=null?`duração ${formatDuration(item.duration_seconds)}`:null
+        ].filter(Boolean).join(' · ');
+        return `<div class="session-row"><div><strong>Sessão ${escapeHtml(String(item.session_id||'').slice(0,8))}</strong><small>${escapeHtml(meta)}</small></div><button class="danger-button" type="button" data-session="${escapeHtml(item.session_id)}" data-code="${escapeHtml(code)}" onclick="requestSessionDeletion(this.dataset.session,this.dataset.code)">Excluir sessão</button></div>`;
+      }).join('')+paginationMarkup('participant-session-pagination',pagination,'loadResearchSessionPage');
+    }
+
+    const deleteAll=document.getElementById('delete-participant-from-details');
+    if(deleteAll){deleteAll.dataset.code=code;deleteAll.onclick=()=>requestParticipantDeletion(deleteAll.dataset.code);}
+  }
+
+  async function loadParticipantSessions(page=1){
+    if(!centralConfigured||!activeParticipantCode)return;
+    participantSessionPage=Math.max(1,Number(page)||1);
+    const data=await adminRequest('participant-sessions',{participant_code:activeParticipantCode,page:participantSessionPage,limit:SESSION_PAGE_SIZE});
+    if(data?.pagination&&participantSessionPage>Number(data.pagination.pages||1)){
+      participantSessionPage=Math.max(1,Number(data.pagination.pages)||1);
+      return loadParticipantSessions(participantSessionPage);
+    }
+    renderParticipantSessions(data);
+  }
+
+  window.loadResearchSessionPage=async function(page){
+    try{await loadParticipantSessions(page);}
+    catch(error){
+      setText('participant-details-summary',error.message);
+      const container=document.getElementById('participant-session-list');
+      if(container)container.innerHTML='<p class="empty-state">Não foi possível carregar as sessões do banco central.</p>';
+    }
+  };
+
+  openParticipantDetails=async function(code){
+    if(!session.isTest)return;
+    if(!centralConfigured){originalOpenParticipantDetails(code);return;}
+    activeParticipantCode=code;
+    participantSessionPage=1;
+    setText('participant-details-title',`Participante ${code}`);
+    setText('participant-details-summary','Carregando sessões do banco central…');
+    const container=document.getElementById('participant-session-list');
+    if(container)container.innerHTML='<p class="empty-state">Carregando…</p>';
+    document.getElementById('participant-details-overlay').classList.remove('hidden');
+    try{await loadParticipantSessions(1);}
+    catch(error){
+      setText('participant-details-summary',error.message);
+      if(container)container.innerHTML='<p class="empty-state">Não foi possível carregar as sessões.</p>';
+    }
+  };
+
+  async function refreshCentralDashboard(resetPage=false){
     if(!centralConfigured)return;
     try{
-      setStorageStatus('Carregando dados do banco central…','syncing');
-      const events=await fetchCentralEvents(false);
-      renderDashboardFromLogs(events);
-      setStorageStatus('Painel usando dados do banco central','success');
+      if(resetPage)participantPage=1;
+      setStorageStatus('Carregando indicadores agregados…','syncing');
+      const summary=await adminRequest('dashboard-summary');
+      renderDashboardSummary(summary);
+      await loadParticipantPage(participantPage);
+      setStorageStatus('Painel paginado usando dados do banco central','success');
     }catch(error){
       if(error.message==='Acesso administrativo cancelado.'){
         setStorageStatus('Painel local — acesso central não informado','warning');
@@ -298,7 +401,7 @@
 
   openResearchDashboard=function(){
     originalOpenResearchDashboard();
-    checkCentralHealth().then(ready=>{if(ready)refreshCentralDashboard();});
+    checkCentralHealth().then(ready=>{if(ready)refreshCentralDashboard(true);});
   };
 
   function safeCsvCell(value){
@@ -406,7 +509,14 @@
       else if(deletion.type==='tests')await adminRequest('clear-tests');
       originalExecuteDeletion();
       showResearchStatus('Exclusão concluída no banco central e neste dispositivo.');
-      await refreshCentralDashboard();
+      await refreshCentralDashboard(false);
+
+      if(deletion.type==='participant'&&activeParticipantCode===deletion.code){
+        activeParticipantCode=null;
+        closeParticipantDetails();
+      }else if(deletion.type==='session'&&activeParticipantCode===deletion.code&&!document.getElementById('participant-details-overlay').classList.contains('hidden')){
+        await loadParticipantSessions(participantSessionPage);
+      }
     }catch(error){showResearchStatus(`Nada foi apagado: ${error.message}`,'error');}
   };
 
