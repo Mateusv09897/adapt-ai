@@ -26,6 +26,26 @@
     return adjusted;
   };
 
+  // Impede cliques concorrentes em "Ainda preciso de uma pista". Sem esse bloqueio,
+  // respostas assíncronas podiam registrar o mesmo help_level final em várias pistas.
+  let hintRequestInFlight=false;
+  requestMoreHelp=async function(){
+    if(hintRequestInFlight||!currentModule||currentModule==='voice')return;
+    const button=document.getElementById('more-help-button');
+    const previousLabel=button?.textContent||'Ainda preciso de uma pista';
+    hintRequestInFlight=true;
+    if(button){button.disabled=true;button.textContent='Gerando próxima pista...';}
+    try{
+      await requestMediation(currentModule,true);
+    }finally{
+      hintRequestInFlight=false;
+      if(button){
+        button.disabled=false;
+        button.textContent=helpLevel>=2?'Ainda preciso de outra pista':previousLabel;
+      }
+    }
+  };
+
   // 2) Duração de atendimento: encerra a medição quando o estudante declara que já
   // consegue voltar à atividade, em vez de incluir o tempo parado na tela de conclusão.
   const centralStartSession=startSession;
