@@ -1,8 +1,32 @@
-// Integridade metodológica da camada de pesquisa do Adapt.
-// Este script é carregado depois de app.js e central-storage.js.
+// Adapt Research Layer
+// Reúne integridade metodológica, exportações e ajustes de UX da pesquisa.
+// Deve ser carregado após app.js e antes de central-storage.js.
 (function(){
+  if(window.__adaptResearchLayerLoaded)return;
+  window.__adaptResearchLayerLoaded=true;
+
   const ADMIN_SESSION_KEY='adapt_research_admin_key';
   let serviceReturnDurationSeconds=null;
+  let hintRequestInFlight=false;
+
+  function safeCsvCell(value){
+    if(value===undefined||value===null)return'';
+    let str=String(value);
+    if(/^[=+\-@]/.test(str))str="'"+str;
+    if(/[;"\r\n]/.test(str))str='"'+str.replace(/"/g,'""')+'"';
+    return str;
+  }
+
+  // CSV local seguro e compatível com Excel pt-BR. A camada central captura esta
+  // função como fallback e a substitui quando o banco estiver disponível.
+  window.exportResearchCsv=function(){
+    const logs=readLogs(RESEARCH_STORAGE_KEY);
+    const columns=['event','timestamp','session_id','participant_code','is_test','module','help_level','input_length','with_code','mode','completed','reason','duration_seconds'];
+    const rows=[columns.join(';')];
+    for(const item of logs)rows.push(columns.map(key=>safeCsvCell(item[key])).join(';'));
+    const blob=new Blob(['\ufeff'+rows.join('\r\n')],{type:'text/csv;charset=utf-8'});
+    downloadBlob(blob,`adapt_pesquisa_${new Date().toISOString().slice(0,10)}.csv`);
+  };
 
   function serviceDurationSeconds(){
     if(!session?.startedAt)return null;
@@ -11,24 +35,21 @@
     return Math.max(0,Math.round((Date.now()-started)/1000));
   }
 
-  // 1) Pistas progressivas: corrige o nível enviado ao modelo e oferece contexto da
-  // mediação anterior para reduzir repetição e tornar o andaime realmente progressivo.
+  // Pistas progressivas: corrige o nível enviado ao modelo e oferece contexto da
+  // mediação anterior para reduzir repetição e manter o andaime progressivo.
   const originalBuildPrompt=buildPrompt;
   buildPrompt=function(type,input,moreHelp=false){
     const prompt=originalBuildPrompt(type,input,moreHelp);
     if(!moreHelp)return prompt;
-
     const nextLevel=Math.max(2,(Number(helpLevel)||1)+1);
     const previous=String(currentResult||'').trim().slice(0,3000);
     let adjusted=prompt.replace(/Esta é a pista de nível\s+\d+\./i,`Esta é a pista de nível ${nextLevel}.`);
-    adjusted+=`\n\nRegra de progressão: não repita a pista anterior. Avance apenas um nível de especificidade, mantendo o estudante responsável pelo raciocínio.`;
+    adjusted+='\n\nRegra de progressão: não repita a pista anterior. Avance apenas um nível de especificidade, mantendo o estudante responsável pelo raciocínio.';
     if(previous)adjusted+=`\n\nMediação anterior, apenas para evitar repetição:\n${previous}`;
     return adjusted;
   };
 
-  // Impede cliques concorrentes em "Ainda preciso de uma pista". Sem esse bloqueio,
-  // respostas assíncronas podiam registrar o mesmo help_level final em várias pistas.
-  let hintRequestInFlight=false;
+  // Evita solicitações concorrentes de pistas, preservando a sequência 1, 2, 3...
   requestMoreHelp=async function(){
     if(hintRequestInFlight||!currentModule||currentModule==='voice')return;
     const button=document.getElementById('more-help-button');
@@ -46,12 +67,12 @@
     }
   };
 
-  // 2) Duração de atendimento: encerra a medição quando o estudante declara que já
-  // consegue voltar à atividade, em vez de incluir o tempo parado na tela de conclusão.
-  const centralStartSession=startSession;
+  // Duração metodológica: mede até o momento em que o estudante declara que já
+  // consegue voltar à própria atividade.
+  const originalStartSession=startSession;
   startSession=function(requireCode){
     serviceReturnDurationSeconds=null;
-    return centralStartSession(requireCode);
+    return originalStartSession(requireCode);
   };
 
   markReturnToActivity=function(){
@@ -83,9 +104,7 @@
     showScreen('start-screen');
   };
 
-  // 3) Leitor de voz: passa a ter um desfecho explícito de retorno à atividade.
-  // Assim, o módulo deixa de gerar apenas eventos de reprodução sem registrar se a
-  // barreira foi superada.
+  // Leitor de voz com desfecho explícito de retorno à atividade.
   const originalPlayVoiceText=playVoiceText;
   playVoiceText=function(){
     const text=document.getElementById('voice-input')?.value.trim();
@@ -128,16 +147,6 @@
     box.style.marginTop='20px';
     box.innerHTML='<strong>Ouvir este trecho ajudou você a continuar?</strong><p>Se a barreira foi superada, volte para sua atividade.</p><div class="return-actions"><button class="success-button" type="button" onclick="markVoiceReturnToActivity()">Sim, consigo continuar</button></div>';
     panel.appendChild(box);
-  }
-
-  // 4) Exportação analítica: mantém o CSV de eventos e acrescenta um CSV com uma
-  // linha por sessão, que é mais adequado para análise estatística posterior.
-  function safeCsvCell(value){
-    if(value===undefined||value===null)return'';
-    let str=String(value);
-    if(/^[=+\-@]/.test(str))str="'"+str;
-    if(/[;"\r\n]/.test(str))str='"'+str.replace(/"/g,'""')+'"';
-    return str;
   }
 
   function sessionRows(logs){
@@ -186,7 +195,7 @@
     return rows.sort((a,b)=>String(a.started_at).localeCompare(String(b.started_at)));
   }
 
-  async function getAdminKey(forcePrompt=false){
+  function getAdminKey(forcePrompt=false){
     let key=!forcePrompt?sessionStorage.getItem(ADMIN_SESSION_KEY):null;
     if(!key){
       key=window.prompt('Digite a senha administrativa do Adapt Research.');
@@ -196,7 +205,7 @@
   }
 
   async function centralResearchEvents(forcePrompt=false){
-    const key=await getAdminKey(forcePrompt);
+    const key=getAdminKey(forcePrompt);
     if(!key)throw new Error('Acesso administrativo cancelado.');
     const response=await fetch('/api/research-admin',{
       method:'POST',
@@ -221,9 +230,6 @@
     }catch(error){
       console.warn('Banco central indisponível; exportação de sessões usando contingência local:',error);
     }
-
-    // Se o banco está operacional, ele é a fonte autoritativa. Erros de credencial
-    // não devem provocar uma exportação local silenciosamente incompleta.
     if(health?.configured&&health.database_reachable!==false)return centralResearchEvents();
     return readLogs(RESEARCH_STORAGE_KEY).filter(i=>!i.is_test);
   }
