@@ -193,13 +193,18 @@
   }
 
   async function researchEventsForSessionExport(){
+    let health=null;
     try{
       const response=await fetch('/api/research-health',{cache:'no-store'});
-      const health=await response.json();
-      if(response.ok&&health.configured&&health.database_reachable!==false)return await centralResearchEvents();
+      health=await response.json();
+      if(!response.ok)health=null;
     }catch(error){
-      console.warn('Exportação de sessões usando contingência local:',error);
+      console.warn('Banco central indisponível; exportação de sessões usando contingência local:',error);
     }
+
+    // Se o banco está operacional, ele é a fonte autoritativa. Erros de credencial
+    // não devem provocar uma exportação local silenciosamente incompleta.
+    if(health?.configured&&health.database_reachable!==false)return centralResearchEvents();
     return readLogs(RESEARCH_STORAGE_KEY).filter(i=>!i.is_test);
   }
 
