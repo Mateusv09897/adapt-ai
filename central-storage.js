@@ -4,9 +4,9 @@
   const CENTRAL_HEALTH='/api/research-health';
   const CENTRAL_SESSION='/api/research-session';
   const CENTRAL_EVENTS='/api/research-events';
+  const CENTRAL_ADMIN_SESSION='/api/research-admin-session';
   const CENTRAL_ADMIN='/api/research-admin';
-  const ADMIN_SESSION_KEY='adapt_research_admin_key';
-  const STORAGE_KEYS=[RESEARCH_STORAGE_KEY,TEST_STORAGE_KEY];
+  const ADMIN_TOKEN_KEY='adapt_research_admin_token';
 
   const originalStartSession=startSession;
   const originalOpenResearchDashboard=openResearchDashboard;
@@ -16,7 +16,6 @@
   const localExportTestJson=window.exportTestJson;
 
   let centralConfigured=false;
-  let centralStatus='checking';
   let syncing=false;
   let syncTimer=null;
 
@@ -40,7 +39,6 @@
   }
 
   function setStorageStatus(label,state='info'){
-    centralStatus=state;
     ensureStorageStatus();
     const el=document.getElementById('central-storage-status');
     if(!el)return;
@@ -71,16 +69,12 @@
     let changed=false;
     for(const item of logs){
       if(!item.event_id){item.event_id=crypto.randomUUID();changed=true;}
-      if(!item.sync_status){
-        item.sync_status=item.participant_code?'pending':'local_only';
-        changed=true;
-      }
+      if(!item.sync_status){item.sync_status=item.participant_code?'pending':'local_only';changed=true;}
     }
     if(changed)writeLogs(storageKey,logs);
     return logs;
   }
 
-  // Substitui apenas a persistência do evento. A estrutura analítica existente continua a mesma.
   saveEvent=function(event,data={}){
     if(!session.id)return null;
     const storageKey=session.isTest?TEST_STORAGE_KEY:RESEARCH_STORAGE_KEY;
@@ -194,31 +188,51 @@
     }
   }
 
-  function getAdminKey(forcePrompt=false){
-    let key=!forcePrompt?sessionStorage.getItem(ADMIN_SESSION_KEY):null;
-    if(!key){
-      key=window.prompt('Digite a senha administrativa do Adapt Research. Ela não é o código TESTE-MATEUS.');
-      if(key)sessionStorage.setItem(ADMIN_SESSION_KEY,key);
+  async function openAdminSession(forcePrompt=false){
+    let token=!forcePrompt?sessionStorage.getItem(ADMIN_TOKEN_KEY):null;
+    if(token)return token;
+
+    const credential=window.prompt('Digite a senha administrativa do Adapt Research. Ela não é o código TESTE-MATEUS.');
+    if(!credential)return null;
+
+    const response=await fetch(CENTRAL_ADMIN_SESSION,{
+      method:'POST',
+      headers:{'Content-Type':'application/json'},
+      body:JSON.stringify({credential})
+    });
+    const data=await response.json().catch(()=>({}));
+    if(!response.ok){
+      const suffix=response.status===429&&data.retry_after?` Tente novamente em cerca de ${Math.ceil(data.retry_after/60)} min.`:'';
+      throw new Error((data.error||'Não foi possível autenticar o pesquisador.')+suffix);
     }
-    return key||null;
+    if(!data.token)throw new Error('O servidor não retornou uma sessão administrativa válida.');
+    sessionStorage.setItem(ADMIN_TOKEN_KEY,data.token);
+    return data.token;
   }
 
   async function adminRequest(action,payload={},forcePrompt=false){
-    const key=getAdminKey(forcePrompt);
-    if(!key)throw new Error('Acesso administrativo cancelado.');
+    const token=await openAdminSession(forcePrompt);
+    if(!token)throw new Error('Acesso administrativo cancelado.');
     const response=await fetch(CENTRAL_ADMIN,{
       method:'POST',
-      headers:{'Content-Type':'application/json','x-research-admin-key':key},
+      headers:{'Content-Type':'application/json','Authorization':`Bearer ${token}`},
       body:JSON.stringify({action,...payload})
     });
-    const data=await response.json();
+    const data=await response.json().catch(()=>({}));
     if(response.status===401){
-      sessionStorage.removeItem(ADMIN_SESSION_KEY);
+      sessionStorage.removeItem(ADMIN_TOKEN_KEY);
       if(!forcePrompt)return adminRequest(action,payload,true);
     }
     if(!response.ok)throw new Error(data.error||'Falha no acesso ao banco central.');
     return data;
   }
+
+  // Ponto único para outras camadas acessarem o backend administrativo sem conhecer a senha.
+  window.adaptResearchAdminRequest=adminRequest;
+  window.lockAdaptResearchAdmin=function(){
+    sessionStorage.removeItem(ADMIN_TOKEN_KEY);
+    showResearchStatus('Sessão administrativa encerrada neste navegador.');
+  };
 
   async function fetchCentralEvents(isTest=false){
     const data=await adminRequest(isTest?'list-tests':'list-research');
@@ -298,6 +312,45 @@
     downloadBlob(new Blob(['\ufeff'+rows.join('\r\n')],{type:'text/csv;charset=utf-8'}),`adapt_pesquisa_${new Date().toISOString().slice(0,10)}.csv`);
   }
 
+  function sessionRows(logs){
+    const groups=new Map();
+    for(const item of logs.filter(i=>!i.is_test&&i.session_id)){
+      if(!groups.has(item.session_id))groups.set(item.session_id,[]);
+      groups.get(item.session_id).push(item);
+    }
+    const rows=[];
+    for(const [sessionId,events] of groups){
+      events.sort((a,b)=>String(a.timestamp||'').localeCompare(String(b.timestamp||'')));
+      const started=events.find(i=>i.event==='session_started');
+      const ended=[...events].reverse().find(i=>i.event==='session_ended');
+      const returned=[...events].reverse().find(i=>i.event==='return_to_activity');
+      const barriers=events.filter(i=>i.event==='barrier_selected'&&i.module).map(i=>i.module);
+      const uniqueBarriers=[...new Set(barriers)];
+      const mediations=events.filter(i=>i.event==='mediation_generated');
+      const hints=events.filter(i=>i.event==='additional_hint_requested');
+      const voiceUses=events.filter(i=>i.event==='voice_started').length;
+      const helpLevels=events.filter(i=>['mediation_generated','additional_hint_requested'].includes(i.event)).map(i=>Number(i.help_level)).filter(Number.isFinite);
+      rows.push({
+        participant_code:started?.participant_code||events[0]?.participant_code||'',
+        session_id:sessionId,
+        started_at:started?.timestamp||events[0]?.timestamp||'',
+        ended_at:ended?.timestamp||'',
+        duration_seconds:ended?.duration_seconds??returned?.duration_seconds??'',
+        completed:ended?.completed??'',
+        end_reason:ended?.reason||'',
+        primary_module:mediations[0]?.module||events.find(i=>i.event==='voice_started')?.module||uniqueBarriers[0]||'',
+        barriers:uniqueBarriers.join(' | '),
+        mediations:mediations.length,
+        additional_hints:hints.length,
+        max_help_level:helpLevels.length?Math.max(...helpLevels):0,
+        returned_to_activity:Boolean(returned),
+        voice_uses:voiceUses,
+        inactivity_warnings:events.filter(i=>i.event==='inactivity_warning').length
+      });
+    }
+    return rows.sort((a,b)=>String(a.started_at).localeCompare(String(b.started_at)));
+  }
+
   window.exportResearchCsv=async function(){
     if(!centralConfigured){localExportResearchCsv();return;}
     try{downloadCsvFromLogs(await fetchCentralEvents(false));}
@@ -320,6 +373,24 @@
     }catch(error){showResearchStatus(error.message,'error');}
   };
 
+  // Sobrescreve a exportação de sessões da research-layer para reutilizar a sessão
+  // administrativa tokenizada. A senha nunca é armazenada em sessionStorage.
+  window.exportResearchSessionsCsv=async function(){
+    try{
+      const logs=centralConfigured?await fetchCentralEvents(false):readLogs(RESEARCH_STORAGE_KEY).filter(i=>!i.is_test);
+      const rows=sessionRows(logs);
+      if(!rows.length){
+        showResearchStatus('Nenhuma sessão real de pesquisa disponível. Sessões TESTE-MATEUS não são incluídas na exportação.');
+        return;
+      }
+      const columns=['participant_code','session_id','started_at','ended_at','duration_seconds','completed','end_reason','primary_module','barriers','mediations','additional_hints','max_help_level','returned_to_activity','voice_uses','inactivity_warnings'];
+      const csvRows=[columns.join(';')];
+      for(const row of rows)csvRows.push(columns.map(key=>safeCsvCell(row[key])).join(';'));
+      downloadBlob(new Blob(['\ufeff'+csvRows.join('\r\n')],{type:'text/csv;charset=utf-8'}),`adapt_sessoes_${new Date().toISOString().slice(0,10)}.csv`);
+      showResearchStatus(`${rows.length} sessão(ões) exportada(s) para análise.`);
+    }catch(error){showResearchStatus(error.message,'error');}
+  };
+
   executeDeletion=async function(){
     if(!centralConfigured){originalExecuteDeletion();return;}
     if(!pendingDeletion)return;
@@ -334,9 +405,7 @@
       originalExecuteDeletion();
       showResearchStatus('Exclusão concluída no banco central e neste dispositivo.');
       await refreshCentralDashboard();
-    }catch(error){
-      showResearchStatus(`Nada foi apagado: ${error.message}`,'error');
-    }
+    }catch(error){showResearchStatus(`Nada foi apagado: ${error.message}`,'error');}
   };
 
   window.addEventListener('online',()=>{checkCentralHealth().then(ready=>{if(ready)scheduleSync(100);});});
@@ -345,6 +414,5 @@
     checkCentralHealth().then(ready=>{if(ready)scheduleSync(300);});
   });
 
-  // Também tenta sincronizar periodicamente para recuperar quedas breves de conexão.
   setInterval(()=>{if(navigator.onLine)scheduleSync(0);},60000);
 })();
