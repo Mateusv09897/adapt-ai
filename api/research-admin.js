@@ -1,13 +1,34 @@
-import { ensureResearchSchema, getSql, isDatabaseConfigured, mapDbEvent, sanitizeParticipantCode, validUuid, verifyAdminKey } from '../lib/research-db.js';
+import {
+  adminClientHash,
+  ensureResearchSchema,
+  getSql,
+  isDatabaseConfigured,
+  mapDbEvent,
+  sanitizeParticipantCode,
+  validUuid,
+  verifyAdminToken
+} from '../lib/research-db.js';
 
-function adminKey(req) {
-  return req.headers['x-research-admin-key'] || '';
+function bearer(req) {
+  const header = String(req.headers.authorization || '');
+  return header.startsWith('Bearer ') ? header.slice(7) : '';
+}
+
+function setNoStore(res) {
+  res.setHeader('Cache-Control', 'no-store, max-age=0');
+  res.setHeader('Pragma', 'no-cache');
 }
 
 export default async function handler(req, res) {
+  setNoStore(res);
   if (req.method !== 'POST') return res.status(405).json({ error: 'Método não permitido. Use POST.' });
   if (!isDatabaseConfigured()) return res.status(503).json({ configured: false, error: 'Armazenamento central ainda não configurado.' });
-  if (!verifyAdminKey(adminKey(req))) return res.status(401).json({ error: 'Credencial administrativa inválida.' });
+
+  try {
+    verifyAdminToken(bearer(req), adminClientHash(req));
+  } catch {
+    return res.status(401).json({ error: 'Sessão administrativa inválida ou expirada.' });
+  }
 
   try {
     const body = typeof req.body === 'string' ? JSON.parse(req.body) : (req.body || {});
@@ -49,6 +70,7 @@ export default async function handler(req, res) {
 
     return res.status(400).json({ error: 'Ação administrativa desconhecida.' });
   } catch (error) {
+    if (error instanceof SyntaxError) return res.status(400).json({ error: 'Payload inválido.' });
     console.error('Erro administrativo da pesquisa:', error);
     return res.status(500).json({ error: 'Falha ao acessar o armazenamento central.' });
   }
