@@ -7,6 +7,11 @@
   const CENTRAL_ADMIN_SESSION='/api/research-admin-session';
   const CENTRAL_ADMIN='/api/research-admin';
   const ADMIN_TOKEN_KEY='adapt_research_admin_token';
+  const LEGACY_ADMIN_KEY='adapt_research_admin_key';
+
+  // Versões anteriores mantinham a senha administrativa no sessionStorage.
+  // Remove qualquer resíduo assim que a nova camada é carregada.
+  sessionStorage.removeItem(LEGACY_ADMIN_KEY);
 
   const originalStartSession=startSession;
   const originalOpenResearchDashboard=openResearchDashboard;
@@ -227,7 +232,6 @@
     return data;
   }
 
-  // Ponto único para outras camadas acessarem o backend administrativo sem conhecer a senha.
   window.adaptResearchAdminRequest=adminRequest;
   window.lockAdaptResearchAdmin=function(){
     sessionStorage.removeItem(ADMIN_TOKEN_KEY);
@@ -373,8 +377,6 @@
     }catch(error){showResearchStatus(error.message,'error');}
   };
 
-  // Sobrescreve a exportação de sessões da research-layer para reutilizar a sessão
-  // administrativa tokenizada. A senha nunca é armazenada em sessionStorage.
   window.exportResearchSessionsCsv=async function(){
     try{
       const logs=centralConfigured?await fetchCentralEvents(false):readLogs(RESEARCH_STORAGE_KEY).filter(i=>!i.is_test);
